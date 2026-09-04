@@ -20,15 +20,11 @@ export function resolveAntigravityAcpLaunch(): AntigravityLaunch {
 	const userBin = path.join(os.homedir(), ".local", "bin", "agy_acp_server.par");
 	if (executable(userBin)) return { command: userBin, args: [], source: "user-bin" };
 
-	const managed = path.join(
-		os.homedir(),
-		".local",
-		"opt",
-		"agy-acp",
-		"current",
-		"agy_acp_server.par",
-	);
-	if (executable(managed)) return { command: managed, args: ["--uid="], source: "managed" };
+	const managedRoot = path.join(os.homedir(), ".local", "opt", "agy-acp", "current");
+	for (const name of ["agy_acp_server.par", "agy_acp_server.exe"]) {
+		const managed = path.join(managedRoot, name);
+		if (executable(managed)) return directOrWrapper(managed, "managed");
+	}
 
 	for (const directory of (process.env.PATH ?? "").split(path.delimiter)) {
 		if (!directory) continue;
@@ -67,7 +63,7 @@ function directOrWrapper(command: string, source: AntigravityLaunch["source"]): 
 	} catch {
 		// Native executable; use the server's required empty uid argument.
 	}
-	return { command, args: ["--uid="], source };
+	return { command, args: process.platform === "linux" ? ["--uid="] : [], source };
 }
 
 function executable(file: string): boolean {

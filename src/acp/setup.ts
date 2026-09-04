@@ -19,14 +19,14 @@ interface RegistryEntry {
 	cmd?: string;
 }
 
-export function ensureAntigravityAcpReady(): Promise<void> {
-	inFlight ??= ensureOnce().finally(() => {
+export function ensureAntigravityAcpReady(onProgress?: (message: string) => void): Promise<void> {
+	inFlight ??= ensureOnce(onProgress).finally(() => {
 		inFlight = undefined;
 	});
 	return inFlight;
 }
 
-async function ensureOnce(): Promise<void> {
+async function ensureOnce(onProgress?: (message: string) => void): Promise<void> {
 	configureDefaultAuth();
 	try {
 		resolveAntigravityAcpLaunch();
@@ -36,6 +36,7 @@ async function ensureOnce(): Promise<void> {
 	}
 
 	try {
+		onProgress?.("Locating the official Antigravity ACP build…");
 		const entry = await registryEntry();
 		const build = buildId(entry.archive);
 		const root = path.join(os.homedir(), ".local", "opt", "agy-acp");
@@ -47,7 +48,9 @@ async function ensureOnce(): Promise<void> {
 			const staging = fs.mkdtempSync(path.join(root, `.install-${build}-`));
 			const archive = path.join(staging, "server.zip");
 			try {
-				await download(entry.archive, archive);
+				onProgress?.("Downloading the Antigravity ACP server (this is a large download)…");
+				await download(entry.archive, archive, onProgress);
+				onProgress?.("Extracting the Antigravity ACP server…");
 				await pipeline(fs.createReadStream(archive), Extract({ path: staging }));
 				fs.rmSync(archive, { force: true });
 				const stagedBinary = path.join(staging, commandName);
@@ -60,8 +63,12 @@ async function ensureOnce(): Promise<void> {
 				throw error;
 			}
 		}
+		const current = path.join(root, "current");
+		fs.rmSync(current, { recursive: true, force: true });
+		fs.symlinkSync(build, current, process.platform === "win32" ? "junction" : "dir");
 		process.env.AGY_ACP_BIN = binary;
 		resolveAntigravityAcpLaunch();
+		onProgress?.("Antigravity ACP server is ready.");
 	} catch (cause) {
 		throw new GeminiAcpError(
 			"spawn",
@@ -84,10 +91,30 @@ async function registryEntry(): Promise<RegistryEntry> {
 	return entry;
 }
 
-async function download(url: string, destination: string): Promise<void> {
+async function download(
+	url: string,
+	destination: string,
+	onProgress?: (message: string) => void,
+): Promise<void> {
 	const response = await fetch(url, { signal: AbortSignal.timeout(INSTALL_TIMEOUT_MS) });
 	if (!response.ok || !response.body) throw new Error(`ACP server download returned HTTP ${response.status}`);
-	await pipeline(response.body, fs.createWriteStream(destination, { mode: 0o600 }));
+	const total = Number(response.headers.get("content-length") ?? 0);
+	let received = 0;
+	let lastReported = 0;
+	const progress = new TransformStream<Uint8Array, Uint8Array>({
+		transform(chunk, controller) {
+			received += chunk.byteLength;
+			if (total > 0) {
+				const percent = Math.floor((received / total) * 100);
+				if (percent >= lastReported + 10) {
+					lastReported = percent;
+					onProgress?.(`Downloading Antigravity ACP: ${percent}%`);
+				}
+			}
+			controller.enqueue(chunk);
+		},
+	});
+	await pipeline(response.body.pipeThrough(progress), fs.createWriteStream(destination, { mode: 0o600 }));
 }
 
 function configureDefaultAuth(): void {
@@ -101,6 +128,12 @@ function configureDefaultAuth(): void {
 }
 
 function platformKey(): string {
+	if (!(["linux", "darwin", "win32"] as string[]).includes(process.platform)) {
+		throw new Error(`Unsupported Antigravity ACP platform: ${process.platform}`);
+	}
+	if (process.arch !== "x64" && process.arch !== "arm64") {
+		throw new Error(`Unsupported Antigravity ACP architecture: ${process.arch}`);
+	}
 	const platform = process.platform === "darwin" ? "darwin" : process.platform === "win32" ? "windows" : "linux";
 	const architecture = process.arch === "arm64" ? "aarch64" : "x86_64";
 	return `${platform}-${architecture}`;

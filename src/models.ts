@@ -1,50 +1,184 @@
-import type { Model } from "@earendil-works/pi-ai";
 import type { ModelInfo } from "@agentclientprotocol/sdk";
+import type {
+	Model,
+	ThinkingLevel,
+	ThinkingLevelMap,
+} from "@earendil-works/pi-ai";
 
 export const PROVIDER_ID = "gemini-acp";
 export const API_ID = "gemini-acp";
 
 const ZERO_COST = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 } as const;
+type Effort = "low" | "medium" | "high";
+type Variants = Partial<Record<Effort, string>>;
 
 export const FALLBACK_MODELS: readonly Model<typeof API_ID>[] = [
-	model("gemini-3.8-flash-high", "Gemini 3.8 Flash (High)"),
-	model("gemini-3.8-flash-medium", "Gemini 3.8 Flash (Medium)"),
-	model("gemini-3.8-flash-low", "Gemini 3.8 Flash (Low)"),
-	model("gemini-3.7-flash-high", "Gemini 3.7 Flash (High)"),
-	model("gemini-3.7-flash-medium", "Gemini 3.7 Flash (Medium)"),
-	model("gemini-3.7-flash-low", "Gemini 3.7 Flash (Low)"),
-	model("gemini-3.6-flash-high", "Gemini 3.6 Flash (High)"),
-	model("gemini-3.6-flash-medium", "Gemini 3.6 Flash (Medium)"),
-	model("gemini-3.6-flash-low", "Gemini 3.6 Flash (Low)"),
-	model("gemini-pro-agent", "Gemini 3.1 Pro (High)"),
-	model("gemini-3.1-pro-low", "Gemini 3.1 Pro (Low)"),
+	reasoningModel("gemini-3.8-flash", "Gemini 3.8 Flash", {
+		low: "gemini-3.8-flash-low",
+		medium: "gemini-3.8-flash-medium",
+		high: "gemini-3.8-flash-high",
+	}),
+	reasoningModel("gemini-3.7-flash", "Gemini 3.7 Flash", {
+		low: "gemini-3.7-flash-low",
+		medium: "gemini-3.7-flash-medium",
+		high: "gemini-3.7-flash-high",
+	}),
+	reasoningModel("gemini-3.6-flash", "Gemini 3.6 Flash", {
+		low: "gemini-3.6-flash-low",
+		medium: "gemini-3.6-flash-medium",
+		high: "gemini-3.6-flash-high",
+	}),
+	reasoningModel("gemini-3.1-pro", "Gemini 3.1 Pro", {
+		low: "gemini-3.1-pro-low",
+		high: "gemini-pro-agent",
+	}),
 ];
 
+/** Collapse Antigravity's effort-qualified ACP IDs into one Pi model. The
+ * exact server IDs live in thinkingLevelMap, allowing Shift+Tab to select the
+ * corresponding low/medium/high variant without cluttering /model. */
 export function projectModels(models: readonly ModelInfo[]): Model<typeof API_ID>[] {
-	const seen = new Set<string>();
-	const projected: Model<typeof API_ID>[] = [];
-	for (const candidate of models) {
+	const safe = models.filter((candidate) => validModelId(candidate.modelId.trim()));
+	const groups = new Map<
+		string,
+		{ name: string; variants: Variants; members: ModelInfo[] }
+	>();
+
+	for (const candidate of safe) {
 		const id = candidate.modelId.trim();
-		if (!validModelId(id) || seen.has(id)) continue;
-		seen.add(id);
-		projected.push(model(id, candidate.name.trim() || id));
+		const parsed = effortFromName(candidate.name) ?? effortFromId(id);
+		if (!id.startsWith("gemini-") || !parsed) continue;
+		const key = parsed.baseName.toLowerCase();
+		const group = groups.get(key) ?? { name: parsed.baseName, variants: {}, members: [] };
+		group.variants[parsed.effort] = id;
+		group.members.push(candidate);
+		groups.set(key, group);
+	}
+
+	const emittedGroups = new Set<string>();
+	const emittedIds = new Set<string>();
+	const projected: Model<typeof API_ID>[] = [];
+	for (const candidate of safe) {
+		const id = candidate.modelId.trim();
+		if (emittedIds.has(id)) continue;
+		const parsed = effortFromName(candidate.name) ?? effortFromId(id);
+		const key = parsed?.baseName.toLowerCase();
+		const group = key ? groups.get(key) : undefined;
+		if (group && Object.keys(group.variants).length >= 2) {
+			if (emittedGroups.has(key!)) continue;
+			emittedGroups.add(key!);
+			for (const member of group.members) emittedIds.add(member.modelId.trim());
+			projected.push(
+				reasoningModel(canonicalId(group.name, group.variants), group.name, group.variants),
+			);
+			continue;
+		}
+		emittedIds.add(id);
+		projected.push(fixedModel(id, candidate.name.trim() || id));
 	}
 	return projected;
 }
 
-function model(id: string, name: string): Model<typeof API_ID> {
+/** Resolve Pi's current reasoning level to the exact model ID advertised by
+ * Antigravity. Unsupported programmatic levels clamp to the nearest tier. */
+export function resolveAcpModelId(
+	model: Model<typeof API_ID>,
+	reasoning: ThinkingLevel | undefined,
+): string {
+	const map = model.thinkingLevelMap;
+	if (!model.reasoning || !map) return model.id;
+	const preferred: Effort =
+		reasoning === "minimal" || reasoning === "low"
+			? "low"
+			: reasoning === "high" || reasoning === "xhigh" || reasoning === "max"
+				? "high"
+				: "medium";
+	const order: Effort[] =
+		preferred === "low"
+			? ["low", "medium", "high"]
+			: preferred === "high"
+				? ["high", "medium", "low"]
+				: ["medium", "high", "low"];
+	for (const effort of order) {
+		const value = map[effort];
+		if (typeof value === "string" && value) return value;
+	}
+	return model.id;
+}
+
+function reasoningModel(
+	id: string,
+	name: string,
+	variants: Variants,
+): Model<typeof API_ID> {
+	const thinkingLevelMap: ThinkingLevelMap = {
+		off: null,
+		minimal: null,
+		low: variants.low ?? null,
+		medium: variants.medium ?? null,
+		high: variants.high ?? null,
+		xhigh: null,
+		max: null,
+	};
+	return baseModel(id, name, true, thinkingLevelMap);
+}
+
+function fixedModel(id: string, name: string): Model<typeof API_ID> {
+	return baseModel(id, name, false);
+}
+
+function baseModel(
+	id: string,
+	name: string,
+	reasoning: boolean,
+	thinkingLevelMap?: ThinkingLevelMap,
+): Model<typeof API_ID> {
 	return {
 		id,
 		name,
 		api: API_ID,
 		provider: PROVIDER_ID,
 		baseUrl: "",
-		reasoning: true,
+		reasoning,
+		...(thinkingLevelMap ? { thinkingLevelMap } : {}),
 		input: ["text", "image"],
 		cost: ZERO_COST,
 		contextWindow: 1_000_000,
 		maxTokens: 65_536,
 	};
+}
+
+function effortFromName(name: string): { baseName: string; effort: Effort } | undefined {
+	const match = name.trim().match(/^(.+?)\s*\((low|medium|high)\)$/iu);
+	if (!match?.[1] || !match[2]) return undefined;
+	return { baseName: match[1].trim(), effort: match[2].toLowerCase() as Effort };
+}
+
+function effortFromId(id: string): { baseName: string; effort: Effort } | undefined {
+	const match = id.match(/^(.+)-(low|medium|high)$/u);
+	if (!match?.[1] || !match[2]) return undefined;
+	return {
+		baseName: titleFromId(match[1]),
+		effort: match[2] as Effort,
+	};
+}
+
+function canonicalId(name: string, variants: Variants): string {
+	const bases = Object.values(variants)
+		.filter((value): value is string => typeof value === "string")
+		.map((value) => value.replace(/-(?:low|medium|high)$/u, ""));
+	if (bases.length > 0 && bases.every((value) => value === bases[0])) return bases[0]!;
+	return name
+		.toLowerCase()
+		.replace(/[^a-z0-9.]+/gu, "-")
+		.replace(/^-+|-+$/gu, "");
+}
+
+function titleFromId(id: string): string {
+	return id
+		.split("-")
+		.map((part) => (part === "gemini" ? "Gemini" : part.charAt(0).toUpperCase() + part.slice(1)))
+		.join(" ");
 }
 
 function validModelId(id: string): boolean {

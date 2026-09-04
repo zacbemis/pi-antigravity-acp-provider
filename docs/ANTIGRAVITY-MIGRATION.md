@@ -21,7 +21,7 @@ The provider now targets Google's Antigravity product surface instead:
 - Uses the bridge's reviewed ACP registry installer when no server is present.
 - Renamed Pi login/provider presentation to **Google Antigravity (ACP)**.
 - Reads only Antigravity auth presence, never token values.
-- Replaced stale Gemini 2.5 fallbacks with current Antigravity model/effort slugs.
+- Replaced stale Gemini 2.5 fallbacks with current Antigravity models. Effort-qualified ACP IDs are collapsed into one Pi model and selected dynamically through Pi's reasoning level.
 - Updated real and authenticated tests to assert `agentInfo.name === "antigravity-acp"`.
 
 ## Verified live
@@ -33,6 +33,7 @@ Against authenticated `agy_acp_server_1.1.1` on Linux:
 - `session/new` returned the authenticated Antigravity catalog, including Gemini 3.8/3.7/3.6 Flash effort variants and Gemini 3.1 Pro variants.
 - A real prompt completed with `stopReason: "end_turn"` and streamed the requested exact response.
 - Both `session/set_model` and `session/set_config_option` were accepted by this server build.
+- Pi reasoning levels now map to exact ACP variants (`low`, `medium`, or `high`) through `session/set_model`; unsupported levels are hidden or safely clamped.
 
 ## Documentation status
 

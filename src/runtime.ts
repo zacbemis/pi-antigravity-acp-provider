@@ -26,6 +26,7 @@ import {
 	piToolFingerprint,
 	type PiToolInvocation,
 } from "./mcp/bridge.js";
+import { resolveAcpModelId } from "./models.js";
 import { type PromptParts, buildPromptParts } from "./stream/context.js";
 import { PiEventWriter } from "./stream/pi-events.js";
 import { usageFromPrompt } from "./stream/usage.js";
@@ -139,9 +140,12 @@ export class GeminiRuntime {
 		}
 	}
 
-	async loginGoogle(signal?: AbortSignal): Promise<void> {
+	async loginGoogle(
+		signal?: AbortSignal,
+		onProgress?: (message: string) => void,
+	): Promise<void> {
 		this.assertActive();
-		if (this.ensureAgent) await ensureAntigravityAcpReady();
+		if (this.ensureAgent) await ensureAntigravityAcpReady(onProgress);
 		const connection = this.connectionFactory({ cwd: process.cwd() });
 		try {
 			const initialize = await connection.initialize();
@@ -158,9 +162,13 @@ export class GeminiRuntime {
 		}
 	}
 
-	async verifyApiKey(apiKey: string, signal?: AbortSignal): Promise<void> {
+	async verifyApiKey(
+		apiKey: string,
+		signal?: AbortSignal,
+		onProgress?: (message: string) => void,
+	): Promise<void> {
 		this.assertActive();
-		if (this.ensureAgent) await ensureAntigravityAcpReady();
+		if (this.ensureAgent) await ensureAntigravityAcpReady(onProgress);
 		const connection = this.connectionFactory({ cwd: process.cwd() });
 		try {
 			const initialize = await connection.initialize();
@@ -236,7 +244,8 @@ export class GeminiRuntime {
 			? `sid:${options.sessionId}`
 			: (this.findContinuationKey(context) ?? `ephemeral:${crypto.randomUUID()}`);
 		const tools = context.tools ?? [];
-		let binding = await this.getBinding(key, model, options.apiKey, writer, tools, options.signal);
+		const acpModelId = resolveAcpModelId(model, options.reasoning);
+		let binding = await this.getBinding(key, model, acpModelId, options.apiKey, writer, tools, options.signal);
 
 		// A permission tool result resumes the still-running ACP prompt rather than
 		// starting a second Gemini turn.
@@ -246,7 +255,7 @@ export class GeminiRuntime {
 			if (!result) {
 				cancelPermission(binding);
 				await this.dropBinding(key, binding);
-				binding = await this.getBinding(key, model, options.apiKey, writer, tools, options.signal);
+				binding = await this.getBinding(key, model, acpModelId, options.apiKey, writer, tools, options.signal);
 			} else {
 				binding.writer = writer;
 				binding.pendingContextCount = context.messages.length;
@@ -275,7 +284,7 @@ export class GeminiRuntime {
 			if (results.some((result) => result.message === undefined)) {
 				cancelPiTools(binding, "Pi continued without returning every requested tool result");
 				await this.dropBinding(key, binding);
-				binding = await this.getBinding(key, model, options.apiKey, writer, tools, options.signal);
+				binding = await this.getBinding(key, model, acpModelId, options.apiKey, writer, tools, options.signal);
 			} else {
 				binding.writer = writer;
 				binding.pendingContextCount = context.messages.length;
@@ -292,7 +301,7 @@ export class GeminiRuntime {
 
 		if (binding.toolFingerprint !== piToolFingerprint(tools)) {
 			await this.dropBinding(key, binding);
-			binding = await this.getBinding(key, model, options.apiKey, writer, tools, options.signal);
+			binding = await this.getBinding(key, model, acpModelId, options.apiKey, writer, tools, options.signal);
 		}
 
 		const previous = binding.queue;
@@ -310,12 +319,12 @@ export class GeminiRuntime {
 					binding.historyFingerprint
 			) {
 				await this.dropBinding(key, binding);
-				binding = await this.getBinding(key, model, options.apiKey, writer, tools, options.signal);
+				binding = await this.getBinding(key, model, acpModelId, options.apiKey, writer, tools, options.signal);
 			}
 			binding.writer = writer;
-			if (binding.modelId !== model.id) {
-				await binding.connection.setModel(binding.session.sessionId, model.id, options.signal);
-				binding.modelId = model.id;
+			if (binding.modelId !== acpModelId) {
+				await binding.connection.setModel(binding.session.sessionId, acpModelId, options.signal);
+				binding.modelId = acpModelId;
 			}
 
 			const fresh = binding.messageCount === 0;
@@ -413,6 +422,7 @@ export class GeminiRuntime {
 	private async getBinding(
 		key: string,
 		model: GeminiModel,
+		acpModelId: string,
 		apiKey: string | undefined,
 		writer: PiEventWriter,
 		tools: Context["tools"],
@@ -420,7 +430,7 @@ export class GeminiRuntime {
 	): Promise<Binding> {
 		const existing = this.bindings.get(key);
 		if (existing) return existing;
-		const created = this.createBinding(key, model, apiKey, writer, tools ?? [], signal).catch((error) => {
+		const created = this.createBinding(key, model, acpModelId, apiKey, writer, tools ?? [], signal).catch((error) => {
 			this.bindings.delete(key);
 			throw error;
 		});
@@ -431,6 +441,7 @@ export class GeminiRuntime {
 	private async createBinding(
 		key: string,
 		model: GeminiModel,
+		acpModelId: string,
 		apiKey: string | undefined,
 		writer: PiEventWriter,
 		tools: NonNullable<Context["tools"]>,
@@ -459,14 +470,14 @@ export class GeminiRuntime {
 			}
 			const session = await connection.newSession(cwd, signal, mcpServer ? [mcpServer] : []);
 			const currentModel = session.models?.currentModelId;
-			if (currentModel !== model.id) await connection.setModel(session.sessionId, model.id, signal);
+			if (currentModel !== acpModelId) await connection.setModel(session.sessionId, acpModelId, signal);
 			binding = {
 				key,
 				cwd,
 				connection,
 				initialize,
 				session,
-				modelId: model.id,
+				modelId: acpModelId,
 				messageCount: 0,
 				historyFingerprint: messagesFingerprint([]),
 				expectedAssistantFingerprint: undefined,

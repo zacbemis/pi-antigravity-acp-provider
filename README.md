@@ -8,28 +8,50 @@ A first-class [Pi](https://github.com/earendil-works/pi) provider for **Google A
 
 - Registers `gemini-acp/*` models backed by Google Antigravity.
 - Uses ACP protocol v1 and the official TypeScript SDK.
-- Discovers the authenticated Antigravity model catalog and switches models per session.
+- Collapses Antigravity's effort-qualified IDs into one entry per model; Pi's Shift+Tab reasoning control selects low/medium/high dynamically.
 - Supports Pi streaming, warm sessions, cancellation, usage metadata, and lifecycle cleanup.
 - Routes compatible Pi tools through an authenticated loopback MCP bridge.
 - Presents ACP permission requests through Pi and defaults to denial; it never chooses an allow option automatically.
 - Advertises no ACP filesystem or terminal client capabilities.
 - Uses a self-service ACP registry installer based on the reviewed `@estebanforge/pi-antigravity-bridge` setup when the official server is absent.
 
-## Install
+## New-user setup
+
+The npm name is not published yet. From a checkout:
 
 ```bash
-pi install npm:pi-gemini-acp-provider
+cd pi-gemini-acp-provider
+npm install
+pi install .
+pi
 ```
 
-For local development:
+For a temporary test without changing Pi's installed-package settings:
 
 ```bash
 pi --no-extensions -e ./extensions/index.ts
 ```
 
-Then use `/login`, choose **Google Antigravity (ACP)**, and select a `gemini-acp` model with `/model`.
+Once the package is published, installation will be:
 
-The provider first looks at `AGY_ACP_BIN`, `~/.local/bin/agy_acp_server.par`, the bridge-managed `~/.local/opt/agy-acp/current/` location, and `PATH`. If absent, it installs the platform build published in the ACP registry. Google's ACP server is a large download (the Linux build observed during development expands to about 1.8 GB).
+```bash
+pi install npm:pi-gemini-acp-provider
+```
+
+In Pi:
+
+1. Run `/login`.
+2. Choose **Sign in with an account**.
+3. Choose **Google Antigravity (ACP)**.
+4. If needed, wait for the official ACP server download and extraction. Progress is shown; the Linux build observed during development expands to about 1.8 GB.
+5. Complete the Google login in the browser.
+6. Run `/model` and select one of the `gemini-acp` models.
+7. Press **Shift+Tab** to choose the reasoning effort. Flash models expose low, medium, and high; Pro exposes only the tiers advertised by Antigravity.
+8. Send a prompt.
+
+The provider first looks at `AGY_ACP_BIN`, `~/.local/bin/agy_acp_server.par`, the managed `~/.local/opt/agy-acp/current/` location, and `PATH`. If absent, it installs the platform build published in the ACP registry. A global `agy` or `gemini` command is not required.
+
+For API-key authentication, choose **Enter an API key** and then **Antigravity Gemini API key** in `/login`, or set `GEMINI_API_KEY` before starting Pi.
 
 Antigravity owns OAuth tokens under `~/.gemini/antigravity-acp/`; Pi stores only a non-secret configured marker. Existing `agy` CLI credentials and Gemini CLI credentials should not be assumed to authenticate this separate ACP server.
 

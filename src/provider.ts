@@ -28,7 +28,9 @@ export function createGeminiProvider(runtime = new GeminiRuntime()): GeminiProvi
 				loginLabel: "Sign in with Google",
 				async login(interaction) {
 					interaction.notify({ type: "progress", message: "Starting Antigravity Google login…" });
-					await runtime.loginGoogle(interaction.signal);
+					await runtime.loginGoogle(interaction.signal, (message) =>
+						interaction.notify({ type: "progress", message }),
+					);
 					return {
 						type: "oauth",
 						// Pi needs a durable credential record so the provider stays visible;
@@ -55,7 +57,9 @@ export function createGeminiProvider(runtime = new GeminiRuntime()): GeminiProvi
 					});
 					if (!key.trim()) throw new Error("Gemini API key is required");
 					interaction.notify({ type: "progress", message: "Verifying Gemini API key…" });
-					await runtime.verifyApiKey(key.trim(), interaction.signal);
+					await runtime.verifyApiKey(key.trim(), interaction.signal, (message) =>
+						interaction.notify({ type: "progress", message }),
+					);
 					return { type: "api_key", key: key.trim() };
 				},
 				async check({ ctx, credential }) {
