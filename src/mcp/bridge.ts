@@ -7,6 +7,7 @@ import {
 } from "@modelcontextprotocol/sdk/types.js";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
+import { timingSafeEqual } from "node:crypto";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { Value } from "typebox/value";
 
@@ -101,7 +102,7 @@ export class PiMcpBridge {
 			response.writeHead(405).end();
 			return;
 		}
-		if (request.headers.authorization !== `Bearer ${this.token}`) {
+		if (!validBearerToken(request.headers.authorization, this.token)) {
 			response.writeHead(401).end();
 			return;
 		}
@@ -244,6 +245,12 @@ async function readJson(request: IncomingMessage): Promise<unknown> {
 		chunks.push(bytes);
 	}
 	return JSON.parse(Buffer.concat(chunks).toString("utf8"));
+}
+
+function validBearerToken(header: string | undefined, token: string): boolean {
+	const actual = Buffer.from(header ?? "");
+	const expected = Buffer.from(`Bearer ${token}`);
+	return actual.byteLength === expected.byteLength && timingSafeEqual(actual, expected);
 }
 
 function toolError(text: string): CallToolResult {

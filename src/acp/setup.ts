@@ -12,6 +12,7 @@ import { AntigravityAcpError } from "./errors.js";
 import {
 	assertPinnedArchive,
 	PINNED_RUNTIME_VERSION,
+	verifyPinnedArchive,
 	verifyPinnedBinary,
 } from "./integrity.js";
 
@@ -102,7 +103,10 @@ async function installPinnedRuntime(
 			const archive = path.join(staging, "server.zip");
 			try {
 				onProgress?.("Downloading the Antigravity ACP server (this is a large download)…");
-				const archiveSha256 = await download(entry.archive, archive, onProgress);
+				const archiveSha256 = verifyPinnedArchive(
+					key,
+					await download(entry.archive, archive, onProgress),
+				);
 				onProgress?.("Extracting and verifying the Antigravity ACP server…");
 				await pipeline(fs.createReadStream(archive), Extract({ path: staging }));
 				fs.rmSync(archive, { force: true });

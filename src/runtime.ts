@@ -17,7 +17,7 @@ import {
 	type AntigravityAuthHealth,
 } from "./acp/antigravity.js";
 import { AntigravityAcpConnection, type AntigravityConnectionOptions } from "./acp/connection.js";
-import { abortError, AntigravityAcpError } from "./acp/errors.js";
+import { abortError, AntigravityAcpError, errorMessage } from "./acp/errors.js";
 import { AcpSessionStore } from "./acp/session-store.js";
 import {
 	MANAGED_AUTH_MARKER,
@@ -207,7 +207,7 @@ export class AntigravityRuntime {
 			await this.discoverModels(apiKey ?? (hasUsableLocalAuth(local) ? MANAGED_AUTH_MARKER : undefined));
 			return { ...local, networkValid: true };
 		} catch (error) {
-			return { ...local, networkValid: false, error: error instanceof Error ? error.message : String(error) };
+			return { ...local, networkValid: false, error: errorMessage(error) };
 		}
 	}
 

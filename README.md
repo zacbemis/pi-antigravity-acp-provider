@@ -14,7 +14,7 @@ A first-class [Pi](https://github.com/earendil-works/pi) provider for **Google A
 - Supports persisted `default`, `auto-edit`, and `yolo` Antigravity permission modes. The requested default is `yolo`; switching to a prompting mode retains the single-use, fail-closed Pi permission broker.
 - Advertises no ACP filesystem or terminal client capabilities.
 - Provides setup, auth-health, logout/account-switching, qualification, quota, and runtime-update commands.
-- Uses a self-service ACP registry installer with exact pinned Google artifact URLs, streaming SHA-256 recording, Linux x64 binary verification, musl rejection, macOS quarantine cleanup, and Windows process-tree handling.
+- Uses a self-service ACP registry installer with exact Google artifact URLs, pinned archive SHA-256 hashes for every supported platform, Linux x64 binary verification, musl rejection, macOS quarantine cleanup, and Windows process-tree handling.
 
 ## New-user setup
 

@@ -7,6 +7,7 @@ import {
 	assertPinnedArchive,
 	PINNED_RUNTIME,
 	sha256File,
+	verifyPinnedArchive,
 } from "../src/acp/integrity.js";
 
 const files: string[] = [];
@@ -20,6 +21,14 @@ describe("runtime integrity", () => {
 			/unreviewed runtime/u,
 		);
 		expect(assertPinnedArchive("linux-x86_64", PINNED_RUNTIME["linux-x86_64"]!.archive)).toBeDefined();
+	});
+
+	it("pins an archive hash for every supported platform", () => {
+		for (const [key, runtime] of Object.entries(PINNED_RUNTIME)) {
+			expect(runtime.archiveSha256).toMatch(/^[a-f0-9]{64}$/u);
+			expect(verifyPinnedArchive(key, runtime.archiveSha256)).toBe(runtime.archiveSha256);
+			expect(() => verifyPinnedArchive(key, "0".repeat(64))).toThrow(/SHA-256 mismatch/u);
+		}
 	});
 
 	it("hashes files deterministically", async () => {
