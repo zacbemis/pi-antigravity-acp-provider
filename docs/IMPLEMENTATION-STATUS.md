@@ -1,6 +1,6 @@
 # Implementation status
 
-Status as of 2026-09-04 for package version 0.1.0.
+Status as of 2026-09-04 for package version 0.1.1.
 
 The bundled Gemini CLI implementation was superseded after its individual Code Assist authentication path was retired. See [ANTIGRAVITY-MIGRATION.md](ANTIGRAVITY-MIGRATION.md).
 
@@ -36,4 +36,4 @@ On Linux with authenticated `agy_acp_server_1.1.1`, ACP protocol 1 initializatio
 - Confirm transcript prefix fingerprints and unseen external-delta replay against real Pi branch/fork/compaction behavior.
 - Complete public beta publishing and Pi marketplace installation verification.
 
-Version 0.1.0 remains a beta implementation.
+Version 0.1.1 remains a beta implementation.

@@ -18,26 +18,20 @@ A first-class [Pi](https://github.com/earendil-works/pi) provider for **Google A
 
 ## New-user setup
 
-The npm name is not published yet. From GitHub:
+Install from the official Pi package gallery/npm:
+
+```bash
+pi install npm:pi-antigravity-acp-provider
+pi
+```
+
+To run from source instead:
 
 ```bash
 git clone https://github.com/zacbemis/pi-antigravity-acp-provider.git
 cd pi-antigravity-acp-provider
 npm install
-pi install .
-pi
-```
-
-For a temporary test without changing Pi's installed-package settings:
-
-```bash
 pi --no-extensions -e ./extensions/index.ts
-```
-
-Once the package is published, installation will be:
-
-```bash
-pi install npm:pi-antigravity-acp-provider
 ```
 
 In Pi:
