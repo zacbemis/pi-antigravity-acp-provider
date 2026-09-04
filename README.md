@@ -11,7 +11,7 @@ A first-class [Pi](https://github.com/earendil-works/pi) provider for **Google A
 - Collapses Antigravity's effort-qualified IDs into one entry per model; Pi's Shift+Tab reasoning control selects low/medium/high dynamically.
 - Supports Pi streaming, warm sessions, cancellation, usage metadata, and lifecycle cleanup.
 - Routes compatible Pi tools through an authenticated loopback MCP bridge.
-- Presents ACP permission requests through Pi and defaults to denial; it never chooses an allow option automatically.
+- Supports persisted `default`, `auto-edit`, and `yolo` Antigravity permission modes. The requested default is `yolo`; switching to a prompting mode retains the single-use, fail-closed Pi permission broker.
 - Advertises no ACP filesystem or terminal client capabilities.
 - Uses a self-service ACP registry installer based on the reviewed `@estebanforge/pi-antigravity-bridge` setup when the official server is absent.
 
@@ -47,7 +47,7 @@ In Pi:
 5. Complete the Google login in the browser.
 6. Run `/model` and select one of the `gemini-acp` models.
 7. Press **Shift+Tab** to choose the reasoning effort. Flash models expose low, medium, and high; Pro exposes only the tiers advertised by Antigravity.
-8. Send a prompt.
+8. Send a prompt. The default permission mode is `yolo`, so Antigravity-native commands and edits can run without confirmation.
 
 The provider first looks at `AGY_ACP_BIN`, `~/.local/bin/agy_acp_server.par`, the managed `~/.local/opt/agy-acp/current/` location, and `PATH`. If absent, it installs the platform build published in the ACP registry. A global `agy` or `gemini` command is not required.
 
@@ -60,7 +60,13 @@ Antigravity owns OAuth tokens under `~/.gemini/antigravity-acp/`; Pi stores only
 ```text
 /gemini-acp doctor
 /gemini-acp doctor --verbose
+/gemini-acp permissions
+/gemini-acp permissions default
+/gemini-acp permissions auto-edit
+/gemini-acp permissions yolo
 ```
+
+Permission mode is saved in `~/.pi/agent/gemini-acp-provider/config.json` and applied immediately to active compatible sessions as well as future sessions.
 
 ## Development
 
@@ -74,7 +80,7 @@ npm audit --audit-level=high
 
 ## Security boundary
 
-This launches a full coding agent with the user's OS privileges. Disabling ACP filesystem/terminal **client callbacks is not a sandbox** for Antigravity-native tools. Pi hooks govern tools routed through the `pi_` MCP namespace; Antigravity-native tools remain governed by Antigravity policy and ACP permission requests.
+This launches a full coding agent with the user's OS privileges. **The default `yolo` mode permits Antigravity-native commands and edits without confirmation.** Use `/gemini-acp permissions default` for confirmation prompts. Disabling ACP filesystem/terminal **client callbacks is not a sandbox** for Antigravity-native tools. Pi hooks govern tools routed through the `pi_` MCP namespace; Antigravity-native tools remain governed by Antigravity policy and ACP permission requests.
 
 ## Compatibility
 

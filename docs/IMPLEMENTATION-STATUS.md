@@ -17,7 +17,7 @@ The bundled Gemini CLI implementation was superseded after its individual Code A
 - ACP text, thought, plan, and native-tool activity mapping to balanced Pi events.
 - ACP usage metadata mapping to Pi usage.
 - Persistent ACP bindings keyed by Pi session ID, serialized turns, rewind detection, and cleanup.
-- Default-deny, single-use ACP permission continuation through a real Pi tool round trip.
+- Persisted Antigravity permission modes (`default`, `auto_edit`, and `yolo`), with `yolo` as the requested default. Prompting modes retain single-use, fail-closed ACP permission continuation through a real Pi tool round trip.
 - Authenticated loopback MCP exposure of active Pi tools with `pi_` namespacing, schema sanitization, original-schema revalidation, bounded catalogs/bodies, and genuine Pi tool-result continuation.
 - Unit, fake-subprocess, cancellation, supervisor, packed-install, real-server initialize, and live authenticated prompt tests.
 

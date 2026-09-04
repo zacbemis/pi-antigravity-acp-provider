@@ -65,7 +65,10 @@ describe("GeminiRuntime", () => {
 			});
 			const snapshot = await runtime.snapshot();
 			expect(snapshot.bindings).toBe(1);
+			expect(snapshot.permissionMode).toBe("yolo");
 			expect(snapshot.processes[0]).toMatchObject({ modelId: "gemini-test", alive: true });
+			await runtime.setPermissionMode("default");
+			expect((await runtime.snapshot()).permissionMode).toBe("default");
 			if (done?.type !== "done") throw new Error("missing first turn");
 			const switchedModel = { ...model, id: "auto", name: "Auto" };
 			const second = runtime.stream(

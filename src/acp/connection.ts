@@ -125,6 +125,17 @@ export class GeminiAcpConnection {
 		);
 	}
 
+	async setMode(sessionId: string, modeId: string, signal?: AbortSignal): Promise<void> {
+		await this.withAbort(
+			this.withDeadline(
+				this.connection.setSessionMode({ sessionId, modeId }),
+				this.operationTimeoutMs,
+				"session/set_mode",
+			),
+			signal,
+		);
+	}
+
 	async prompt(request: PromptRequest, signal?: AbortSignal): Promise<PromptResponse> {
 		if (signal?.aborted) throw abortError();
 		const pending = this.connection.prompt(request);

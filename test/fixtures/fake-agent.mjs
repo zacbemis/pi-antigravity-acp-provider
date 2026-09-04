@@ -5,6 +5,7 @@ import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/
 const rl = readline.createInterface({ input: process.stdin, crlfDelay: Infinity });
 const send = (value) => process.stdout.write(`${JSON.stringify(value)}\n`);
 let model = "auto";
+let mode = "default";
 let permissionPromptId;
 let hangingPromptId;
 let bridgePromptId;
@@ -63,6 +64,14 @@ for await (const line of rl) {
 			id,
 			result: {
 				sessionId: "fake-session",
+				modes: {
+					currentModeId: mode,
+					availableModes: [
+						{ id: "default", name: "Default" },
+						{ id: "auto_edit", name: "Auto Edit" },
+						{ id: "yolo", name: "YOLO" },
+					],
+				},
 				models: {
 					currentModelId: model,
 					availableModels: [
@@ -74,6 +83,9 @@ for await (const line of rl) {
 		});
 	} else if (method === "session/set_model") {
 		model = params.modelId;
+		send({ jsonrpc: "2.0", id, result: {} });
+	} else if (method === "session/set_mode") {
+		mode = params.modeId;
 		send({ jsonrpc: "2.0", id, result: {} });
 	} else if (method === "session/prompt") {
 		const text = params.prompt.filter((block) => block.type === "text").map((block) => block.text).join("\n");

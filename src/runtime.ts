@@ -26,6 +26,7 @@ import {
 	piToolFingerprint,
 	type PiToolInvocation,
 } from "./mcp/bridge.js";
+import type { PermissionMode } from "./config.js";
 import { resolveAcpModelId } from "./models.js";
 import { type PromptParts, buildPromptParts } from "./stream/context.js";
 import { PiEventWriter } from "./stream/pi-events.js";
@@ -88,6 +89,7 @@ export interface PermissionToolResult {
 
 export interface RuntimeSnapshot {
 	bindings: number;
+	permissionMode: PermissionMode;
 	processes: Array<{
 		key: string;
 		pid?: number;
@@ -112,10 +114,12 @@ export class GeminiRuntime {
 
 	private readonly connectionFactory: GeminiConnectionFactory;
 	private readonly ensureAgent: boolean;
+	private permissionMode: PermissionMode;
 
-	constructor(connectionFactory?: GeminiConnectionFactory) {
+	constructor(connectionFactory?: GeminiConnectionFactory, permissionMode: PermissionMode = "yolo") {
 		this.connectionFactory = connectionFactory ?? ((options) => new GeminiAcpConnection(options));
 		this.ensureAgent = connectionFactory === undefined;
+		this.permissionMode = permissionMode;
 	}
 
 	stream(model: GeminiModel, context: Context, options: SimpleStreamOptions = {}): PiEventWriter {
@@ -179,6 +183,16 @@ export class GeminiRuntime {
 		}
 	}
 
+	async setPermissionMode(mode: PermissionMode): Promise<void> {
+		await Promise.all(
+			[...this.resolvedBindings].map(async (binding) => {
+				if (!supportsMode(binding.session, mode)) return;
+				await binding.connection.setMode(binding.session.sessionId, mode);
+			}),
+		);
+		this.permissionMode = mode;
+	}
+
 	getPermission(requestId: string): PermissionView | undefined {
 		for (const binding of this.resolvedBindings) {
 			if (binding.permission?.id === requestId) return permissionView(binding.permission);
@@ -207,7 +221,7 @@ export class GeminiRuntime {
 				};
 			}),
 		);
-		return { bindings: this.bindings.size, processes };
+		return { bindings: this.bindings.size, permissionMode: this.permissionMode, processes };
 	}
 
 	async close(): Promise<void> {
@@ -469,6 +483,9 @@ export class GeminiRuntime {
 				mcpServer = await bridge.start();
 			}
 			const session = await connection.newSession(cwd, signal, mcpServer ? [mcpServer] : []);
+			if (supportsMode(session, this.permissionMode) && session.modes?.currentModeId !== this.permissionMode) {
+				await connection.setMode(session.sessionId, this.permissionMode, signal);
+			}
 			const currentModel = session.models?.currentModelId;
 			if (currentModel !== acpModelId) await connection.setModel(session.sessionId, acpModelId, signal);
 			binding = {
@@ -608,6 +625,10 @@ function adaptPromptToCapabilities(parts: PromptParts, initialize: InitializeRes
 		output.push(block);
 	}
 	return { ...parts, prompt: output };
+}
+
+function supportsMode(session: NewSessionResponse, mode: PermissionMode): boolean {
+	return session.modes?.availableModes.some((candidate) => candidate.id === mode) === true;
 }
 
 function permissionView(permission: PendingPermission): PermissionView {

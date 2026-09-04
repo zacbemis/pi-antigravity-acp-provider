@@ -1,5 +1,7 @@
 # Authentication, permissions, and security
 
+> **Historical design:** this document describes the superseded Gemini CLI/default-deny architecture. The current Antigravity implementation defaults to `yolo` at the user's request, meaning native commands and edits may run without confirmation. Use `/gemini-acp permissions default` for the safer prompting posture. See [ANTIGRAVITY-MIGRATION.md](ANTIGRAVITY-MIGRATION.md).
+
 ## 1. Security posture
 
 This extension launches a full coding agent with the user's OS privileges. ACP permission requests improve user control; they do not create an OS sandbox. Gemini CLI can have native file, shell, web, extension, and MCP capabilities. Users must trust both this package and the pinned official CLI dependency.
