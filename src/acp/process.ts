@@ -1,0 +1,157 @@
+import { type ChildProcessWithoutNullStreams, spawn } from "node:child_process";
+import path from "node:path";
+import { Readable, Writable } from "node:stream";
+import { fileURLToPath } from "node:url";
+
+import { resolveAntigravityAcpLaunch } from "./antigravity.js";
+import { redact } from "./errors.js";
+const STDERR_LIMIT = 16 * 1024;
+// Longer than supervisor.mjs's 750 ms agent-tree escalation window.
+const KILL_GRACE_MS = 1_500;
+let nextGeneration = 1;
+
+export interface GeminiProcessOptions {
+	cwd: string;
+	entryPath?: string;
+	command?: string;
+	args?: string[];
+	env?: NodeJS.ProcessEnv;
+}
+
+export interface ProcessExit {
+	code: number | null;
+	signal: NodeJS.Signals | null;
+	stderrTail: string;
+}
+
+export function resolveSupervisorEntry(): string {
+	return fileURLToPath(new URL("./supervisor.mjs", import.meta.url));
+}
+
+export function resolveBundledGeminiEntry(): string {
+	// Kept as a compatibility export for diagnostics; the provider now targets
+	// Google Antigravity's ACP server rather than the retired Gemini CLI client.
+	return resolveAntigravityAcpLaunch().command;
+}
+
+export class GeminiProcess {
+	readonly generation = nextGeneration++;
+	readonly child: ChildProcessWithoutNullStreams;
+	readonly input: ReadableStream<Uint8Array>;
+	readonly output: WritableStream<Uint8Array>;
+	readonly exited: Promise<ProcessExit>;
+	private stderr = "";
+	private settled = false;
+	private closing?: Promise<void>;
+
+	constructor(options: GeminiProcessOptions) {
+		let command: string;
+		let args: string[];
+		if (options.command) {
+			command = options.command;
+			args = options.args ?? [];
+		} else {
+			const launch = options.entryPath
+				? { command: process.execPath, args: [options.entryPath, ...(options.args ?? [])] }
+				: resolveAntigravityAcpLaunch();
+			command = process.execPath;
+			args = [resolveSupervisorEntry(), "--command", launch.command, ...launch.args];
+		}
+		let resolveExit!: (exit: ProcessExit) => void;
+		this.exited = new Promise((resolve) => {
+			resolveExit = resolve;
+		});
+
+		const child = spawn(command, args, {
+			cwd: path.resolve(options.cwd),
+			env: options.env ?? process.env,
+			stdio: ["pipe", "pipe", "pipe"],
+			shell: false,
+			windowsHide: true,
+			detached: process.platform !== "win32",
+		});
+		this.child = child;
+		child.stderr.setEncoding("utf8");
+		child.stderr.on("data", (chunk: string) => {
+			this.stderr = redact((this.stderr + chunk).slice(-STDERR_LIMIT));
+		});
+		child.once("error", (cause) => {
+			this.finish(resolveExit, null, null, `spawn failed: ${cause.message}`);
+		});
+		child.once("exit", (code, signal) => {
+			this.finish(resolveExit, code, signal, this.stderr);
+		});
+
+		this.input = Readable.toWeb(child.stdout) as ReadableStream<Uint8Array>;
+		this.output = Writable.toWeb(child.stdin) as WritableStream<Uint8Array>;
+	}
+
+	get pid(): number | undefined {
+		return this.child.pid;
+	}
+
+	get stderrTail(): string {
+		return this.stderr;
+	}
+
+	get alive(): boolean {
+		// child.killed only records that kill() was called; it does not mean the
+		// process has exited. Keep it alive until exit/error settles.
+		return !this.settled && this.child.exitCode === null;
+	}
+
+	async close(): Promise<void> {
+		this.closing ??= this.closeOnce();
+		return this.closing;
+	}
+
+	private async closeOnce(): Promise<void> {
+		if (!this.alive) return;
+		try {
+			this.child.stdin.end();
+		} catch {
+			// The child may already have closed its input.
+		}
+		this.signal("SIGTERM");
+		const exited = await Promise.race([
+			this.exited.then(() => true),
+			delay(KILL_GRACE_MS).then(() => false),
+		]);
+		if (!exited && this.alive) {
+			this.signal("SIGKILL");
+			await Promise.race([this.exited, delay(KILL_GRACE_MS)]);
+		}
+	}
+
+	private signal(signal: NodeJS.Signals): void {
+		try {
+			if (process.platform !== "win32" && this.child.pid) {
+				process.kill(-this.child.pid, signal);
+			} else {
+				this.child.kill(signal);
+			}
+		} catch {
+			// ESRCH: already gone. Windows may reject SIGKILL spelling.
+			if (process.platform === "win32") this.child.kill();
+		}
+	}
+
+	private finish(
+		resolve: (exit: ProcessExit) => void,
+		code: number | null,
+		signal: NodeJS.Signals | null,
+		stderrTail: string,
+	): void {
+		if (this.settled) return;
+		this.settled = true;
+		resolve({ code, signal, stderrTail: redact(stderrTail) });
+	}
+}
+
+function delay(ms: number): Promise<void> {
+	return new Promise((resolve) => {
+		const timer = setTimeout(resolve, ms);
+		timer.unref?.();
+	});
+}
+

@@ -1,0 +1,165 @@
+import readline from "node:readline";
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
+
+const rl = readline.createInterface({ input: process.stdin, crlfDelay: Infinity });
+const send = (value) => process.stdout.write(`${JSON.stringify(value)}\n`);
+let model = "auto";
+let permissionPromptId;
+let hangingPromptId;
+let bridgePromptId;
+let mcpServer;
+
+for await (const line of rl) {
+	if (!line.trim()) continue;
+	const message = JSON.parse(line);
+	if (!("id" in message)) {
+		if (message.method === "session/cancel" && hangingPromptId !== undefined) {
+			send({ jsonrpc: "2.0", id: hangingPromptId, result: { stopReason: "cancelled" } });
+			hangingPromptId = undefined;
+		}
+		if (message.method === "session/cancel" && bridgePromptId !== undefined) {
+			send({ jsonrpc: "2.0", id: bridgePromptId, result: { stopReason: "cancelled" } });
+			bridgePromptId = undefined;
+		}
+		continue;
+	}
+	const { id, method, params } = message;
+	if (id === "permission-1" && method === undefined && permissionPromptId !== undefined) {
+		const decision = message.result?.outcome?.outcome ?? "cancelled";
+		send({
+			jsonrpc: "2.0",
+			method: "session/update",
+			params: {
+				sessionId: "fake-session",
+				update: { sessionUpdate: "agent_message_chunk", content: { type: "text", text: `Decision: ${decision}` } },
+			},
+		});
+		send({ jsonrpc: "2.0", id: permissionPromptId, result: { stopReason: "end_turn" } });
+		permissionPromptId = undefined;
+	} else if (method === "initialize") {
+		send({
+			jsonrpc: "2.0",
+			id,
+			result: {
+				protocolVersion: 1,
+				agentInfo: { name: "fake-gemini", version: "1.0.0" },
+				authMethods: [
+					{ id: "oauth-personal", name: "Log in with Google" },
+					{ id: "api", name: "Gemini API key", _meta: { "api-key": { provider: "google" } } },
+				],
+				agentCapabilities: {
+					promptCapabilities: { image: true, embeddedContext: true },
+					mcpCapabilities: { http: true },
+				},
+			},
+		});
+	} else if (method === "authenticate") {
+		send({ jsonrpc: "2.0", id, result: {} });
+	} else if (method === "session/new") {
+		mcpServer = params.mcpServers?.find((server) => server.type === "http");
+		send({
+			jsonrpc: "2.0",
+			id,
+			result: {
+				sessionId: "fake-session",
+				models: {
+					currentModelId: model,
+					availableModels: [
+						{ modelId: "auto", name: "Auto" },
+						{ modelId: "gemini-test", name: "Gemini Test" },
+					],
+				},
+			},
+		});
+	} else if (method === "session/set_model") {
+		model = params.modelId;
+		send({ jsonrpc: "2.0", id, result: {} });
+	} else if (method === "session/prompt") {
+		const text = params.prompt.filter((block) => block.type === "text").map((block) => block.text).join("\n");
+		if (text.includes("bridge") && mcpServer) {
+			bridgePromptId = id;
+			const invocation = text.includes("parallel")
+				? Promise.all([
+						invokeMcpTool(mcpServer, "first"),
+						new Promise((resolve) => setTimeout(resolve, 50)).then(() => invokeMcpTool(mcpServer, "second")),
+					]).then((results) => results.join(","))
+				: invokeMcpTool(mcpServer, "from gemini");
+			void invocation.then(async (result) => {
+				if (text.includes("bridge delayed")) await new Promise((resolve) => setTimeout(resolve, 500));
+				if (bridgePromptId !== id) return;
+				bridgePromptId = undefined;
+				send({
+					jsonrpc: "2.0",
+					method: "session/update",
+					params: {
+						sessionId: params.sessionId,
+						update: { sessionUpdate: "agent_message_chunk", content: { type: "text", text: result } },
+					},
+				});
+				send({ jsonrpc: "2.0", id, result: { stopReason: "end_turn" } });
+			});
+			continue;
+		}
+		if (text.includes("hang")) {
+			hangingPromptId = id;
+			continue;
+		}
+		if (text.includes("permission")) {
+			permissionPromptId = id;
+			send({
+				jsonrpc: "2.0",
+				id: "permission-1",
+				method: "session/request_permission",
+				params: {
+					sessionId: params.sessionId,
+					toolCall: { toolCallId: "native-tool-1", title: "Run native command", kind: "execute" },
+					options: [
+						{ optionId: "allow-once", name: "Allow once", kind: "allow_once" },
+						{ optionId: "reject-once", name: "Reject", kind: "reject_once" },
+					],
+				},
+			});
+			continue;
+		}
+		send({
+			jsonrpc: "2.0",
+			method: "session/update",
+			params: {
+				sessionId: params.sessionId,
+				update: { sessionUpdate: "agent_thought_chunk", content: { type: "text", text: "Checking" } },
+			},
+		});
+		send({
+			jsonrpc: "2.0",
+			method: "session/update",
+			params: {
+				sessionId: params.sessionId,
+				update: { sessionUpdate: "agent_message_chunk", content: { type: "text", text: "Hello" } },
+			},
+		});
+		send({
+			jsonrpc: "2.0",
+			id,
+			result: {
+				stopReason: "end_turn",
+				_meta: { quota: { token_count: { input_tokens: 7, output_tokens: 3 }, model_usage: [] } },
+			},
+		});
+	} else {
+		send({ jsonrpc: "2.0", id, error: { code: -32601, message: `Unknown method ${method}` } });
+	}
+}
+
+async function invokeMcpTool(server, text) {
+	const headers = Object.fromEntries(server.headers.map((header) => [header.name, header.value]));
+	const client = new Client({ name: "fake-gemini", version: "1" }, { capabilities: {} });
+	const transport = new StreamableHTTPClientTransport(new URL(server.url), { requestInit: { headers } });
+	try {
+		await client.connect(transport);
+		const result = await client.callTool({ name: "pi_echo", arguments: { text } });
+		return result.content.filter((block) => block.type === "text").map((block) => block.text).join("\n");
+	} finally {
+		await client.close();
+	}
+}

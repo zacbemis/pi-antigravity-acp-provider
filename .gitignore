@@ -1,0 +1,7 @@
+# Research workspace
+node_modules/
+dist/
+coverage/
+*.log
+*.tgz
+.env*
