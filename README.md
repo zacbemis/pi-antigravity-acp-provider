@@ -18,9 +18,10 @@ A first-class [Pi](https://github.com/earendil-works/pi) provider for **Google A
 
 ## New-user setup
 
-The npm name is not published yet. From a checkout:
+The npm name is not published yet. From GitHub:
 
 ```bash
+git clone https://github.com/zacbemis/pi-antigravity-acp-provider.git
 cd pi-antigravity-acp-provider
 npm install
 pi install .
