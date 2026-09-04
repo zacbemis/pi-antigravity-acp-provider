@@ -6,7 +6,7 @@ import readline from "node:readline";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { GeminiProcess, resolveSupervisorEntry } from "../src/acp/process.js";
+import { AntigravityProcess, resolveSupervisorEntry } from "../src/acp/process.js";
 
 const parentFixture = fileURLToPath(new URL("./fixtures/watchdog-parent.mjs", import.meta.url));
 const agentFixture = fileURLToPath(new URL("./fixtures/long-agent.mjs", import.meta.url));
@@ -27,7 +27,7 @@ afterEach(() => {
 
 describe.skipIf(process.platform === "win32")("parent-death supervisor", () => {
 	it("escalates from TERM to KILL for a stuck direct child", async () => {
-		const child = new GeminiProcess({
+		const child = new AntigravityProcess({
 			cwd: process.cwd(),
 			command: process.execPath,
 			args: [ignoreTermFixture],
@@ -40,7 +40,7 @@ describe.skipIf(process.platform === "win32")("parent-death supervisor", () => {
 	});
 
 	it("exits promptly when the supervised agent exits", async () => {
-		const child = new GeminiProcess({ cwd: process.cwd(), entryPath: exitAgentFixture, args: [] });
+		const child = new AntigravityProcess({ cwd: process.cwd(), entryPath: exitAgentFixture, args: [] });
 		const exit = await Promise.race([
 			child.exited,
 			delay(2_000).then(() => {
@@ -52,7 +52,7 @@ describe.skipIf(process.platform === "win32")("parent-death supervisor", () => {
 	});
 
 	it("kills the Gemini process group after an abrupt parent death", async () => {
-		const directory = await fs.mkdtemp(path.join(os.tmpdir(), "gemini-acp-watchdog-"));
+		const directory = await fs.mkdtemp(path.join(os.tmpdir(), "antigravity-acp-watchdog-"));
 		const pidFile = path.join(directory, "pids.json");
 		const parent = spawn(process.execPath, [parentFixture, resolveSupervisorEntry(), agentFixture, pidFile], {
 			stdio: ["ignore", "pipe", "inherit"],

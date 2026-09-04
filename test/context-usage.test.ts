@@ -2,6 +2,7 @@ import type { Context } from "@earendil-works/pi-ai";
 import { describe, expect, it } from "vitest";
 
 import { buildPromptParts } from "../src/stream/context.js";
+import { quotaFromPrompt } from "../src/status.js";
 import { usageFromPrompt } from "../src/stream/usage.js";
 
 describe("prompt context", () => {
@@ -13,8 +14,8 @@ describe("prompt context", () => {
 				{
 					role: "assistant",
 					content: [{ type: "text", text: "prior" }],
-					api: "gemini-acp",
-					provider: "gemini-acp",
+					api: "antigravity-acp",
+					provider: "antigravity-acp",
 					model: "auto",
 					usage: usageFromPrompt({ stopReason: "end_turn" }),
 					stopReason: "stop",
@@ -37,8 +38,8 @@ describe("prompt context", () => {
 				{
 					role: "assistant",
 					content: [{ type: "toolCall", id: "call-1", name: "read", arguments: { path: "a.ts" } }],
-					api: "gemini-acp",
-					provider: "gemini-acp",
+					api: "antigravity-acp",
+					provider: "antigravity-acp",
 					model: "auto",
 					usage: usageFromPrompt({ stopReason: "end_turn" }),
 					stopReason: "toolUse",
@@ -110,6 +111,22 @@ describe("usageFromPrompt", () => {
 			reasoning: 3,
 			totalTokens: 30,
 		});
+	});
+
+	it("extracts quota metadata when the server supplies it", () => {
+		expect(
+			quotaFromPrompt({
+				stopReason: "end_turn",
+				_meta: {
+					quota: {
+						remainingQueries: 12,
+						queryLimit: 100,
+						resetTimestamp: 1_800_000_000,
+						tier: "pro",
+					},
+				},
+			}),
+		).toMatchObject({ remaining: 12, limit: 100, tier: "pro" });
 	});
 
 	it("rejects malformed counts to zero", () => {

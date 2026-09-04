@@ -2,14 +2,14 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
-import { GeminiAcpConnection } from "../src/acp/connection.js";
+import { AntigravityAcpConnection } from "../src/acp/connection.js";
 
 const fakeAgent = fileURLToPath(new URL("./fixtures/fake-agent.mjs", import.meta.url));
 
-describe("GeminiAcpConnection", () => {
+describe("AntigravityAcpConnection", () => {
 	it("uses the official SDK against a real child process", async () => {
 		const updates: string[] = [];
-		const connection = new GeminiAcpConnection({
+		const connection = new AntigravityAcpConnection({
 			cwd: path.dirname(fakeAgent),
 			command: process.execPath,
 			args: [fakeAgent],

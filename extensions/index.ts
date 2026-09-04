@@ -1,7 +1,12 @@
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import type {
+	ExtensionAPI,
+	ExtensionCommandContext,
+} from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 
-import { resolveBundledGeminiEntry } from "../src/acp/process.js";
+import { inspectAntigravityAuth } from "../src/acp/antigravity.js";
+import { resolveAntigravityAcpEntry } from "../src/acp/process.js";
+import { updateAntigravityAcpRuntime } from "../src/acp/setup.js";
 import {
 	isPermissionMode,
 	loadConfig,
@@ -15,28 +20,29 @@ import {
 	ANTIGRAVITY_ACP_VERSION,
 	PACKAGE_VERSION,
 } from "../src/constants.js";
-import { createGeminiProvider } from "../src/provider.js";
+import { createAntigravityProvider } from "../src/provider.js";
 import {
-	GeminiRuntime,
+	AntigravityRuntime,
 	PERMISSION_RESULT_KIND,
 	PERMISSION_TOOL_NAME,
 	type PermissionToolResult,
 } from "../src/runtime.js";
+import { runSetupWizard } from "../src/wizard.js";
 
-export default function geminiAcpExtension(pi: ExtensionAPI): void {
-	const runtime = new GeminiRuntime(undefined, loadConfig().permissions);
-	const { provider } = createGeminiProvider(runtime);
+export default function antigravityAcpExtension(pi: ExtensionAPI): void {
+	const runtime = new AntigravityRuntime(undefined, loadConfig().permissions);
+	const { provider } = createAntigravityProvider(runtime);
 	pi.registerProvider(provider);
 
 	pi.registerTool({
 		name: PERMISSION_TOOL_NAME,
-		label: "Gemini ACP Permission",
+		label: "Antigravity ACP Permission",
 		description: "Presents an Antigravity ACP permission request to the user. Only call IDs emitted by the provider are valid.",
 		parameters: Type.Object({ requestId: Type.String({ minLength: 1, maxLength: 128 }) }),
 		executionMode: "sequential",
 		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
 			const request = runtime.getPermission(params.requestId);
-			if (!request) throw new Error("This Gemini permission request is missing, expired, or already used");
+			if (!request) throw new Error("This Antigravity permission request is missing, expired, or already used");
 			const labels = request.options.map(
 				(option, index) => `${index + 1}. ${option.label} [${option.kind.replaceAll("_", " ")}]`,
 			);
@@ -66,10 +72,41 @@ export default function geminiAcpExtension(pi: ExtensionAPI): void {
 		},
 	});
 
-	pi.registerCommand("gemini-acp", {
-		description: "Configure Antigravity permissions or show provider status",
-		handler: async (args, ctx) => {
+	const commandDefinition = {
+		description: "Set up, inspect, update, or configure Google Antigravity ACP",
+		handler: async (args: string, ctx: ExtensionCommandContext) => {
 			const command = args.trim() || "doctor";
+			if (command === "setup") {
+				await runSetupWizard(ctx.ui, runtime);
+				return;
+			}
+			if (command === "update" || command === "update-runtime") {
+				const result = await updateAntigravityAcpRuntime((message) => ctx.ui.notify(message, "info"));
+				ctx.ui.notify(
+					result.changed
+						? `Installed Antigravity ACP ${result.version}. Restart Pi to move active sessions to it.`
+						: `Antigravity ACP ${result.version} is already installed and pinned.`,
+					"info",
+				);
+				return;
+			}
+			if (command === "logout" || command === "account" || command === "switch-account") {
+				await runtime.logout();
+				ctx.ui.notify(
+					"Local Antigravity credentials and saved ACP sessions were cleared. Run /logout for the old Pi marker, then /login to choose the next account.",
+					"info",
+				);
+				return;
+			}
+			if (command === "quota") {
+				const metrics = (await runtime.snapshot()).metrics;
+				ctx.ui.notify(formatMetrics(metrics), "info");
+				return;
+			}
+			if (command === "qualify") {
+				await runSetupWizard(ctx.ui, runtime);
+				return;
+			}
 			if (command === "permissions" || command.startsWith("permissions ")) {
 				let requested = command.slice("permissions".length).trim().replaceAll("-", "_");
 				if (!requested) {
@@ -84,7 +121,7 @@ export default function geminiAcpExtension(pi: ExtensionAPI): void {
 				}
 				if (!isPermissionMode(requested)) {
 					ctx.ui.notify(
-						"Usage: /gemini-acp permissions [default|auto-edit|yolo]",
+						"Usage: /antigravity-acp permissions [default|auto-edit|yolo]",
 						"warning",
 					);
 					return;
@@ -103,36 +140,70 @@ export default function geminiAcpExtension(pi: ExtensionAPI): void {
 			const verbose = command === "doctor --verbose";
 			if (command !== "doctor" && command !== "status" && !verbose) {
 				ctx.ui.notify(
-					"Usage: /gemini-acp doctor [--verbose] | permissions [default|auto-edit|yolo]",
+					"Usage: /antigravity-acp [setup|doctor|status|quota|update|logout|account|qualify|permissions]",
 					"warning",
 				);
 				return;
 			}
 			let entry: string;
 			try {
-				entry = resolveBundledGeminiEntry();
+				entry = resolveAntigravityAcpEntry();
 			} catch (error) {
 				entry = error instanceof Error ? error.message : String(error);
 			}
 			const snapshot = await runtime.snapshot(verbose);
+			const auth = inspectAntigravityAuth();
 			ctx.ui.notify(
 				[
-					`Gemini ACP provider ${PACKAGE_VERSION}`,
+					`Antigravity ACP provider ${PACKAGE_VERSION}`,
 					`Runtime: Antigravity ACP ${ANTIGRAVITY_ACP_VERSION}, ACP SDK ${ACP_SDK_VERSION}, protocol ${ACP_PROTOCOL_VERSION}`,
 					`Antigravity server: ${entry}`,
+					`Authentication: ${auth.status}${auth.authType ? ` (${auth.authType})` : ""}`,
 					`Permission mode: ${permissionModeLabel(snapshot.permissionMode)}`,
 					`Active bindings: ${snapshot.bindings}`,
+					formatMetrics(snapshot.metrics),
 					...snapshot.processes.flatMap((item) => [
-						`• pid=${item.pid ?? "?"} generation=${item.generation} model=${item.modelId} alive=${item.alive} agent=${item.agentVersion ?? "?"} mcpHttp=${item.mcpHttp} permission=${item.waitingForPermission} tools=${item.waitingForTools}`,
+						`• pid=${item.pid ?? "?"} generation=${item.generation} model=${item.modelId} alive=${item.alive} restored=${item.restored} agent=${item.agentVersion ?? "?"} mcpHttp=${item.mcpHttp} permission=${item.waitingForPermission} tools=${item.waitingForTools}`,
 						...(verbose && item.stderrTail ? [`  stderr (redacted): ${item.stderrTail}`] : []),
 					]),
 				].join("\n"),
 				"info",
 			);
 		},
+	};
+	pi.registerCommand("antigravity-acp", commandDefinition);
+	pi.registerCommand("gemini-acp", {
+		...commandDefinition,
+		description: "Deprecated alias for /antigravity-acp",
 	});
 
 	pi.on("session_shutdown", async () => {
 		await runtime.close();
 	});
+}
+
+function formatMetrics(metrics: {
+	totals: {
+		turns: number;
+		input: number;
+		output: number;
+		reasoning: number;
+		cacheRead: number;
+		cacheWrite: number;
+	};
+	latestQuota?: { remaining?: number; limit?: number; resetAt?: string; tier?: string; model?: string };
+}): string {
+	const totalTokens =
+		metrics.totals.input +
+		metrics.totals.output +
+		metrics.totals.reasoning +
+		metrics.totals.cacheRead +
+		metrics.totals.cacheWrite;
+	const quota = metrics.latestQuota;
+	return [
+		`Usage this process: turns=${metrics.totals.turns} tokens=${totalTokens} input=${metrics.totals.input} output=${metrics.totals.output} reasoning=${metrics.totals.reasoning} cacheRead=${metrics.totals.cacheRead}`,
+		quota
+			? `Latest quota: remaining=${quota.remaining ?? "unknown"}/${quota.limit ?? "unknown"} reset=${quota.resetAt ?? "unknown"} tier=${quota.tier ?? "unknown"} model=${quota.model ?? "unknown"}`
+			: "Latest quota: not supplied by the Antigravity server",
+	].join("\n");
 }

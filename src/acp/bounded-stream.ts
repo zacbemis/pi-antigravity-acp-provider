@@ -116,9 +116,9 @@ function enqueueFrame(
 	try {
 		value = JSON.parse(text);
 	} catch (cause) {
-		throw new Error("Gemini ACP emitted malformed JSON", { cause });
+		throw new Error("Antigravity ACP emitted malformed JSON", { cause });
 	}
-	if (!isMessage(value)) throw new Error("Gemini ACP emitted an invalid JSON-RPC message");
+	if (!isMessage(value)) throw new Error("Antigravity ACP emitted an invalid JSON-RPC message");
 	controller.enqueue(value);
 }
 

@@ -9,17 +9,18 @@ import type {
 	SimpleStreamOptions,
 } from "@earendil-works/pi-ai";
 
+import { hasAntigravityAuth } from "./acp/antigravity.js";
 import { FALLBACK_MODELS, projectModels, PROVIDER_ID } from "./models.js";
-import { GeminiRuntime, MANAGED_AUTH_MARKER } from "./runtime.js";
+import { AntigravityRuntime, MANAGED_AUTH_MARKER } from "./runtime.js";
 
-export interface GeminiProviderBundle {
-	provider: Provider<"gemini-acp">;
-	runtime: GeminiRuntime;
+export interface AntigravityProviderBundle {
+	provider: Provider<"antigravity-acp">;
+	runtime: AntigravityRuntime;
 }
 
-export function createGeminiProvider(runtime = new GeminiRuntime()): GeminiProviderBundle {
+export function createAntigravityProvider(runtime = new AntigravityRuntime()): AntigravityProviderBundle {
 	let models = [...FALLBACK_MODELS];
-	const provider: Provider<"gemini-acp"> = {
+	const provider: Provider<"antigravity-acp"> = {
 		id: PROVIDER_ID,
 		name: "Google Antigravity (ACP)",
 		auth: {
@@ -65,11 +66,8 @@ export function createGeminiProvider(runtime = new GeminiRuntime()): GeminiProvi
 				async check({ ctx, credential }) {
 					if (credential?.key) return { type: "api_key", source: "Pi auth store" };
 					if (await ctx.env("GEMINI_API_KEY")) return { type: "api_key", source: "GEMINI_API_KEY" };
-					if (
-						(await ctx.fileExists("~/.gemini/antigravity-acp/acp_token.json")) ||
-						(await ctx.fileExists("~/.gemini/antigravity-acp/settings.json"))
-					) {
-						return { type: "api_key", source: "Antigravity ACP" };
+					if (hasAntigravityAuth()) {
+						return { type: "api_key", source: "Antigravity OAuth refresh token" };
 					}
 					return undefined;
 				},
@@ -81,11 +79,8 @@ export function createGeminiProvider(runtime = new GeminiRuntime()): GeminiProvi
 							source: credential?.key ? "Pi auth store" : "GEMINI_API_KEY",
 						};
 					}
-					if (
-						(await ctx.fileExists("~/.gemini/antigravity-acp/acp_token.json")) ||
-						(await ctx.fileExists("~/.gemini/antigravity-acp/settings.json"))
-					) {
-						return { auth: { apiKey: MANAGED_AUTH_MARKER }, source: "Antigravity ACP" };
+					if (hasAntigravityAuth()) {
+						return { auth: { apiKey: MANAGED_AUTH_MARKER }, source: "Antigravity OAuth refresh token" };
 					}
 					return undefined;
 				},
@@ -126,12 +121,12 @@ export function createGeminiProvider(runtime = new GeminiRuntime()): GeminiProvi
 }
 
 function stream(
-	runtime: GeminiRuntime,
-	model: Model<"gemini-acp">,
+	runtime: AntigravityRuntime,
+	model: Model<"antigravity-acp">,
 	context: Context,
-	options: ApiStreamOptions<"gemini-acp"> | SimpleStreamOptions | undefined,
+	options: ApiStreamOptions<"antigravity-acp"> | SimpleStreamOptions | undefined,
 ): AssistantMessageEventStream {
 	return runtime.stream(model, context, options as SimpleStreamOptions | undefined).stream;
 }
 
-export const GEMINI_ACP_API = "gemini-acp" satisfies Api;
+export const ANTIGRAVITY_ACP_API = "antigravity-acp" satisfies Api;

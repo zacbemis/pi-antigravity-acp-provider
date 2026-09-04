@@ -5,8 +5,8 @@ import type {
 	ThinkingLevelMap,
 } from "@earendil-works/pi-ai";
 
-export const PROVIDER_ID = "gemini-acp";
-export const API_ID = "gemini-acp";
+export const PROVIDER_ID = "antigravity-acp";
+export const API_ID = "antigravity-acp";
 
 const ZERO_COST = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 } as const;
 type Effort = "low" | "medium" | "high";

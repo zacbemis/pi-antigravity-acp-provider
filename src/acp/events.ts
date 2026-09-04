@@ -20,7 +20,7 @@ export function mapSessionUpdate(notification: SessionNotification): AcpActivity
 				: [{ type: "unknown", updateType: `agent_thought:${update.content.type}` }];
 		case "tool_call": {
 			const status = update.status ? ` — ${update.status}` : "";
-			return [{ type: "tool", text: `\n[Gemini tool: ${clean(update.title)}${status}]\n` }];
+			return [{ type: "tool", text: `\n[Antigravity tool: ${clean(update.title)}${status}]\n` }];
 		}
 		case "tool_call_update": {
 			const label = update.title ? clean(update.title) : clean(update.toolCallId);
@@ -29,13 +29,13 @@ export function mapSessionUpdate(notification: SessionNotification): AcpActivity
 			return [
 				{
 					type: "tool",
-					text: `\n[Gemini tool update: ${label}${status}]${details ? `\n${details}\n` : "\n"}`,
+					text: `\n[Antigravity tool update: ${label}${status}]${details ? `\n${details}\n` : "\n"}`,
 				},
 			];
 		}
 		case "plan": {
 			const lines = update.entries.map((entry) => `- [${entry.status}] ${clean(entry.content)}`);
-			return lines.length ? [{ type: "plan", text: `\n[Gemini plan]\n${lines.join("\n")}\n` }] : [];
+			return lines.length ? [{ type: "plan", text: `\n[Antigravity plan]\n${lines.join("\n")}\n` }] : [];
 		}
 		default:
 			return [{ type: "unknown", updateType: update.sessionUpdate }];

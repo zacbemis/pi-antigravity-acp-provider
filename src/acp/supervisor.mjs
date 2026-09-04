@@ -18,7 +18,7 @@ const agent = spawn(agentCommand, agentArgs, {
 	stdio: ["pipe", "pipe", "pipe"],
 	shell: false,
 	windowsHide: true,
-	// Give Gemini and every tool it starts a group separate from the watchdog.
+	// Give Antigravity and every tool it starts a group separate from the watchdog.
 	detached: process.platform !== "win32",
 	env: process.env,
 });
@@ -83,7 +83,13 @@ function shutdown(_reason, exitCode) {
 
 function signalAgent(signal) {
 	try {
-		if (process.platform !== "win32" && agent.pid) process.kill(-agent.pid, signal);
+		if (process.platform === "win32" && agent.pid) {
+			const args = ["/PID", String(agent.pid), "/T"];
+			if (signal === "SIGKILL") args.push("/F");
+			spawn("taskkill", args, { stdio: "ignore", windowsHide: true });
+			return;
+		}
+		if (agent.pid) process.kill(-agent.pid, signal);
 		else agent.kill(signal);
 	} catch {
 		// ESRCH means the process tree is already gone.

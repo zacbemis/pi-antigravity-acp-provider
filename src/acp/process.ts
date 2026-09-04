@@ -10,7 +10,7 @@ const STDERR_LIMIT = 16 * 1024;
 const KILL_GRACE_MS = 1_500;
 let nextGeneration = 1;
 
-export interface GeminiProcessOptions {
+export interface AntigravityProcessOptions {
 	cwd: string;
 	entryPath?: string;
 	command?: string;
@@ -28,13 +28,13 @@ export function resolveSupervisorEntry(): string {
 	return fileURLToPath(new URL("./supervisor.mjs", import.meta.url));
 }
 
-export function resolveBundledGeminiEntry(): string {
+export function resolveAntigravityAcpEntry(): string {
 	// Kept as a compatibility export for diagnostics; the provider now targets
 	// Google Antigravity's ACP server rather than the retired Gemini CLI client.
 	return resolveAntigravityAcpLaunch().command;
 }
 
-export class GeminiProcess {
+export class AntigravityProcess {
 	readonly generation = nextGeneration++;
 	readonly child: ChildProcessWithoutNullStreams;
 	readonly input: ReadableStream<Uint8Array>;
@@ -44,7 +44,7 @@ export class GeminiProcess {
 	private settled = false;
 	private closing?: Promise<void>;
 
-	constructor(options: GeminiProcessOptions) {
+	constructor(options: AntigravityProcessOptions) {
 		let command: string;
 		let args: string[];
 		if (options.command) {
@@ -125,14 +125,16 @@ export class GeminiProcess {
 
 	private signal(signal: NodeJS.Signals): void {
 		try {
-			if (process.platform !== "win32" && this.child.pid) {
-				process.kill(-this.child.pid, signal);
-			} else {
-				this.child.kill(signal);
+			if (process.platform === "win32" && this.child.pid) {
+				const args = ["/PID", String(this.child.pid), "/T"];
+				if (signal === "SIGKILL") args.push("/F");
+				spawn("taskkill", args, { stdio: "ignore", windowsHide: true });
+				return;
 			}
+			if (this.child.pid) process.kill(-this.child.pid, signal);
+			else this.child.kill(signal);
 		} catch {
-			// ESRCH: already gone. Windows may reject SIGKILL spelling.
-			if (process.platform === "win32") this.child.kill();
+			// ESRCH means the process tree is already gone.
 		}
 	}
 

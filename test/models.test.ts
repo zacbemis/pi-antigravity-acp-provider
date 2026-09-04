@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { projectModels, resolveAcpModelId } from "../src/models.js";
-import { createGeminiProvider } from "../src/provider.js";
+import { createAntigravityProvider } from "../src/provider.js";
 
 describe("projectModels", () => {
 	it("deduplicates and rejects unsafe ids", () => {
@@ -33,7 +33,7 @@ describe("projectModels", () => {
 	});
 
 	it("registers separate Google-account and API-key login methods", async () => {
-		const { provider, runtime } = createGeminiProvider();
+		const { provider, runtime } = createAntigravityProvider();
 		try {
 			expect(provider.auth.oauth?.loginLabel).toBe("Sign in with Google");
 			expect(provider.auth.apiKey?.name).toBe("Antigravity Gemini API key");

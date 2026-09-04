@@ -1,4 +1,4 @@
-export type GeminiAcpErrorCode =
+export type AntigravityAcpErrorCode =
 	| "aborted"
 	| "auth"
 	| "model"
@@ -8,19 +8,19 @@ export type GeminiAcpErrorCode =
 	| "process_exit"
 	| "invalid_input";
 
-export class GeminiAcpError extends Error {
+export class AntigravityAcpError extends Error {
 	constructor(
-		readonly code: GeminiAcpErrorCode,
+		readonly code: AntigravityAcpErrorCode,
 		message: string,
 		options?: ErrorOptions,
 	) {
 		super(message, options);
-		this.name = "GeminiAcpError";
+		this.name = "AntigravityAcpError";
 	}
 }
 
-export function abortError(message = "Gemini ACP request aborted"): GeminiAcpError {
-	return new GeminiAcpError("aborted", message);
+export function abortError(message = "Antigravity ACP request aborted"): AntigravityAcpError {
+	return new AntigravityAcpError("aborted", message);
 }
 
 export function errorMessage(cause: unknown): string {

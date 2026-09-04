@@ -1,21 +1,25 @@
 import type { Context, Model } from "@earendil-works/pi-ai";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { Type } from "typebox";
 import { describe, expect, it } from "vitest";
 
-import { GeminiAcpConnection } from "../src/acp/connection.js";
+import { AntigravityAcpConnection } from "../src/acp/connection.js";
+import { AcpSessionStore } from "../src/acp/session-store.js";
 import {
-	GeminiRuntime,
+	AntigravityRuntime,
 	PERMISSION_RESULT_KIND,
 	PERMISSION_TOOL_NAME,
 } from "../src/runtime.js";
 
 const fakeAgent = fileURLToPath(new URL("./fixtures/fake-agent.mjs", import.meta.url));
-const model: Model<"gemini-acp"> = {
+const model: Model<"antigravity-acp"> = {
 	id: "gemini-test",
 	name: "Gemini Test",
-	api: "gemini-acp",
-	provider: "gemini-acp",
+	api: "antigravity-acp",
+	provider: "antigravity-acp",
 	baseUrl: "",
 	reasoning: true,
 	input: ["text", "image"],
@@ -24,10 +28,10 @@ const model: Model<"gemini-acp"> = {
 	maxTokens: 8_192,
 };
 
-describe("GeminiRuntime", () => {
+describe("AntigravityRuntime", () => {
 	it("recognizes Gemini CLI's advertised Google login method", async () => {
-		const runtime = new GeminiRuntime(
-			(options) => new GeminiAcpConnection({ ...options, command: process.execPath, args: [fakeAgent] }),
+		const runtime = new AntigravityRuntime(
+			(options) => new AntigravityAcpConnection({ ...options, command: process.execPath, args: [fakeAgent] }),
 		);
 		try {
 			await expect(runtime.loginGoogle()).resolves.toBeUndefined();
@@ -37,8 +41,8 @@ describe("GeminiRuntime", () => {
 	});
 
 	it("maps a complete ACP turn into balanced Pi events", async () => {
-		const runtime = new GeminiRuntime(
-			(options) => new GeminiAcpConnection({ ...options, command: process.execPath, args: [fakeAgent] }),
+		const runtime = new AntigravityRuntime(
+			(options) => new AntigravityAcpConnection({ ...options, command: process.execPath, args: [fakeAgent] }),
 		);
 		try {
 			const context: Context = {
@@ -93,9 +97,50 @@ describe("GeminiRuntime", () => {
 		}
 	});
 
+	it("restores a persisted ACP session across runtime restarts", async () => {
+		const directory = fs.mkdtempSync(path.join(os.tmpdir(), "antigravity-runtime-session-"));
+		const store = new AcpSessionStore(path.join(directory, "sessions.json"));
+		const factory = (options: ConstructorParameters<typeof AntigravityAcpConnection>[0]) =>
+			new AntigravityAcpConnection({ ...options, command: process.execPath, args: [fakeAgent] });
+		const firstRuntime = new AntigravityRuntime(factory, "yolo", store);
+		try {
+			const firstContext: Context = {
+				messages: [{ role: "user", content: "first", timestamp: 1 }],
+			};
+			const first = firstRuntime.stream(model, firstContext, { sessionId: "persisted", apiKey: "test-key" });
+			const firstEvents = [];
+			for await (const event of first.stream) firstEvents.push(event);
+			const done = firstEvents.at(-1);
+			if (done?.type !== "done") throw new Error("first turn did not complete");
+			await firstRuntime.close();
+
+			const secondRuntime = new AntigravityRuntime(factory, "yolo", store);
+			try {
+				const second = secondRuntime.stream(
+					model,
+					{
+						messages: [
+							...firstContext.messages,
+							done.message,
+							{ role: "user", content: "second", timestamp: 2 },
+						],
+					},
+					{ sessionId: "persisted", apiKey: "test-key" },
+				);
+				for await (const _event of second.stream) void _event;
+				expect((await secondRuntime.snapshot()).processes[0]?.restored).toBe(true);
+			} finally {
+				await secondRuntime.close();
+			}
+		} finally {
+			await firstRuntime.close();
+			fs.rmSync(directory, { recursive: true, force: true });
+		}
+	});
+
 	it("recreates the ACP session when the owned Pi prefix changes", async () => {
-		const runtime = new GeminiRuntime(
-			(options) => new GeminiAcpConnection({ ...options, command: process.execPath, args: [fakeAgent] }),
+		const runtime = new AntigravityRuntime(
+			(options) => new AntigravityAcpConnection({ ...options, command: process.execPath, args: [fakeAgent] }),
 		);
 		try {
 			const first = runtime.stream(
@@ -125,8 +170,8 @@ describe("GeminiRuntime", () => {
 	});
 
 	it("parks a permission request and resumes it from a Pi tool result", async () => {
-		const runtime = new GeminiRuntime(
-			(options) => new GeminiAcpConnection({ ...options, command: process.execPath, args: [fakeAgent] }),
+		const runtime = new AntigravityRuntime(
+			(options) => new AntigravityAcpConnection({ ...options, command: process.execPath, args: [fakeAgent] }),
 		);
 		try {
 			const firstContext: Context = {
@@ -193,8 +238,8 @@ describe("GeminiRuntime", () => {
 	});
 
 	it("round-trips an MCP call through a genuine Pi tool call", async () => {
-		const runtime = new GeminiRuntime(
-			(options) => new GeminiAcpConnection({ ...options, command: process.execPath, args: [fakeAgent] }),
+		const runtime = new AntigravityRuntime(
+			(options) => new AntigravityAcpConnection({ ...options, command: process.execPath, args: [fakeAgent] }),
 		);
 		try {
 			const tools = [
@@ -243,8 +288,8 @@ describe("GeminiRuntime", () => {
 	});
 
 	it("batches staggered parallel MCP calls into one Pi tool turn", async () => {
-		const runtime = new GeminiRuntime(
-			(options) => new GeminiAcpConnection({ ...options, command: process.execPath, args: [fakeAgent] }),
+		const runtime = new AntigravityRuntime(
+			(options) => new AntigravityAcpConnection({ ...options, command: process.execPath, args: [fakeAgent] }),
 		);
 		try {
 			const tools = [
@@ -289,8 +334,8 @@ describe("GeminiRuntime", () => {
 	});
 
 	it("honors cancellation on an MCP continuation stream", async () => {
-		const runtime = new GeminiRuntime(
-			(options) => new GeminiAcpConnection({ ...options, command: process.execPath, args: [fakeAgent] }),
+		const runtime = new AntigravityRuntime(
+			(options) => new AntigravityAcpConnection({ ...options, command: process.execPath, args: [fakeAgent] }),
 		);
 		try {
 			const tools = [
@@ -342,8 +387,8 @@ describe("GeminiRuntime", () => {
 	});
 
 	it("cancels an ACP prompt while preserving a healthy warm binding", async () => {
-		const runtime = new GeminiRuntime(
-			(options) => new GeminiAcpConnection({ ...options, command: process.execPath, args: [fakeAgent] }),
+		const runtime = new AntigravityRuntime(
+			(options) => new AntigravityAcpConnection({ ...options, command: process.execPath, args: [fakeAgent] }),
 		);
 		try {
 			const controller = new AbortController();

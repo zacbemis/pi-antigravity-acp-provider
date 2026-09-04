@@ -4,8 +4,10 @@ import {
 	RequestError,
 	type AuthenticateRequest,
 	type InitializeResponse,
+	type LoadSessionResponse,
 	type McpServer,
 	type NewSessionResponse,
+	type ResumeSessionResponse,
 	type PromptRequest,
 	type PromptResponse,
 	type RequestPermissionRequest,
@@ -15,33 +17,33 @@ import {
 
 import { PACKAGE_VERSION } from "../constants.js";
 import { boundedNdjsonStream } from "./bounded-stream.js";
-import { abortError, GeminiAcpError } from "./errors.js";
-import { GeminiProcess, type GeminiProcessOptions } from "./process.js";
+import { abortError, AntigravityAcpError } from "./errors.js";
+import { AntigravityProcess, type AntigravityProcessOptions } from "./process.js";
 
-export interface GeminiConnectionHandlers {
+export interface AntigravityConnectionHandlers {
 	onUpdate?: (notification: SessionNotification) => void | Promise<void>;
 	onPermission?: (request: RequestPermissionRequest) => Promise<RequestPermissionResponse>;
 }
 
-export interface GeminiConnectionOptions extends GeminiProcessOptions {
-	handlers?: GeminiConnectionHandlers;
+export interface AntigravityConnectionOptions extends AntigravityProcessOptions {
+	handlers?: AntigravityConnectionHandlers;
 	initializeTimeoutMs?: number;
 	operationTimeoutMs?: number;
 	maxFrameBytes?: number;
 }
 
-export class GeminiAcpConnection {
-	readonly process: GeminiProcess;
+export class AntigravityAcpConnection {
+	readonly process: AntigravityProcess;
 	readonly initialized: Promise<InitializeResponse>;
 	private readonly connection: ClientSideConnection;
 	private readonly operationTimeoutMs: number;
-	private handlers: GeminiConnectionHandlers;
+	private handlers: AntigravityConnectionHandlers;
 	private closePromise?: Promise<void>;
 
-	constructor(options: GeminiConnectionOptions) {
+	constructor(options: AntigravityConnectionOptions) {
 		this.handlers = options.handlers ?? {};
 		this.operationTimeoutMs = options.operationTimeoutMs ?? 30_000;
-		this.process = new GeminiProcess(options);
+		this.process = new AntigravityProcess(options);
 		const stream = boundedNdjsonStream(this.process.output, this.process.input, {
 			...(options.maxFrameBytes === undefined ? {} : { maxFrameBytes: options.maxFrameBytes }),
 			onProtocolError: () => void this.process.close(),
@@ -64,8 +66,8 @@ export class GeminiAcpConnection {
 					terminal: false,
 				},
 				clientInfo: {
-					name: "pi-gemini-acp-provider",
-					title: "Pi Gemini ACP Provider",
+					name: "pi-antigravity-acp-provider",
+					title: "Pi Antigravity ACP Provider",
 					version: PACKAGE_VERSION,
 				},
 			}),
@@ -74,7 +76,7 @@ export class GeminiAcpConnection {
 		);
 	}
 
-	setHandlers(handlers: GeminiConnectionHandlers): void {
+	setHandlers(handlers: AntigravityConnectionHandlers): void {
 		this.handlers = handlers;
 	}
 
@@ -82,7 +84,7 @@ export class GeminiAcpConnection {
 		const response = await this.initialized;
 		if (response.protocolVersion !== PROTOCOL_VERSION) {
 			await this.close();
-			throw new GeminiAcpError(
+			throw new AntigravityAcpError(
 				"protocol",
 				`Unsupported ACP protocol version ${String(response.protocolVersion)}`,
 			);
@@ -109,6 +111,40 @@ export class GeminiAcpConnection {
 				this.connection.newSession({ cwd, mcpServers }),
 				this.operationTimeoutMs,
 				"session/new",
+			),
+			signal,
+		);
+	}
+
+	async loadSession(
+		sessionId: string,
+		cwd: string,
+		mcpServers: McpServer[] = [],
+		signal?: AbortSignal,
+	): Promise<LoadSessionResponse> {
+		await this.initialize();
+		return this.withAbort(
+			this.withDeadline(
+				this.connection.loadSession({ sessionId, cwd, mcpServers }),
+				this.operationTimeoutMs,
+				"session/load",
+			),
+			signal,
+		);
+	}
+
+	async resumeSession(
+		sessionId: string,
+		cwd: string,
+		mcpServers: McpServer[] = [],
+		signal?: AbortSignal,
+	): Promise<ResumeSessionResponse> {
+		await this.initialize();
+		return this.withAbort(
+			this.withDeadline(
+				this.connection.unstable_resumeSession({ sessionId, cwd, mcpServers }),
+				this.operationTimeoutMs,
+				"session/resume",
 			),
 			signal,
 		);
@@ -215,7 +251,7 @@ export class GeminiAcpConnection {
 				new Promise<never>((_resolve, reject) => {
 					timer = setTimeout(() => {
 						void this.close();
-						reject(new GeminiAcpError("timeout", `Gemini ACP ${phase} timed out after ${timeoutMs}ms`));
+						reject(new AntigravityAcpError("timeout", `Antigravity ACP ${phase} timed out after ${timeoutMs}ms`));
 					}, timeoutMs);
 					timer.unref?.();
 				}),
@@ -227,7 +263,7 @@ export class GeminiAcpConnection {
 }
 
 function classifyError(error: unknown): Error {
-	if (error instanceof GeminiAcpError) return error;
+	if (error instanceof AntigravityAcpError) return error;
 	const structured =
 		error instanceof RequestError
 			? error
@@ -239,11 +275,11 @@ function classifyError(error: unknown): Error {
 				: undefined;
 	if (structured) {
 		if (structured.code === -32000) {
-			return new GeminiAcpError("auth", `Gemini authentication required: ${structured.message}`, {
+			return new AntigravityAcpError("auth", `Antigravity authentication required: ${structured.message}`, {
 				cause: error,
 			});
 		}
-		return new GeminiAcpError("protocol", `Gemini ACP error ${structured.code}: ${structured.message}`, {
+		return new AntigravityAcpError("protocol", `Antigravity ACP error ${structured.code}: ${structured.message}`, {
 			cause: error,
 		});
 	}

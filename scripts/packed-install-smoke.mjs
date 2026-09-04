@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 
 const root = path.resolve(import.meta.dirname, "..");
-const temporary = fs.mkdtempSync(path.join(os.tmpdir(), "pi-gemini-acp-pack-"));
+const temporary = fs.mkdtempSync(path.join(os.tmpdir(), "pi-antigravity-acp-pack-"));
 let tarball;
 
 try {
@@ -16,7 +16,7 @@ try {
 		["install", "--ignore-scripts", "--legacy-peer-deps", tarball],
 		{ cwd: temporary, stdio: "inherit" },
 	);
-	const installed = path.join(temporary, "node_modules", "pi-gemini-acp-provider");
+	const installed = path.join(temporary, "node_modules", "pi-antigravity-acp-provider");
 	for (const required of ["extensions/index.ts", "src/acp/supervisor.mjs", "src/mcp/bridge.ts"]) {
 		if (!fs.existsSync(path.join(installed, required))) throw new Error(`Packed file is missing: ${required}`);
 	}
@@ -32,14 +32,14 @@ try {
 			"-e",
 			path.join(installed, "extensions/index.ts"),
 			"--list-models",
-			"gemini-acp",
+			"antigravity-acp",
 		],
 		{
 			encoding: "utf8",
 			env: { ...process.env, GEMINI_API_KEY: "packed-smoke-placeholder" },
 		},
 	);
-	if (!models.includes("gemini-acp")) throw new Error("Packed extension did not register Gemini models");
+	if (!models.includes("antigravity-acp")) throw new Error("Packed extension did not register Gemini models");
 	process.stdout.write("Packed install passed with Antigravity ACP setup support.\n");
 } finally {
 	fs.rmSync(temporary, { recursive: true, force: true });

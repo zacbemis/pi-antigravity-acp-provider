@@ -1,6 +1,6 @@
 # Authentication, permissions, and security
 
-> **Historical design:** this document describes the superseded Gemini CLI/default-deny architecture. The current Antigravity implementation defaults to `yolo` at the user's request, meaning native commands and edits may run without confirmation. Use `/gemini-acp permissions default` for the safer prompting posture. See [ANTIGRAVITY-MIGRATION.md](ANTIGRAVITY-MIGRATION.md).
+> **Historical design:** this document describes the superseded Gemini CLI/default-deny architecture. The current Antigravity implementation defaults to `yolo` at the user's request, meaning native commands and edits may run without confirmation. Use `/antigravity-acp permissions default` for the safer prompting posture. See [ANTIGRAVITY-MIGRATION.md](ANTIGRAVITY-MIGRATION.md).
 
 ## 1. Security posture
 
@@ -49,7 +49,7 @@ Validate Pi's actual `/login` and model-picker behavior in M0. Document the fina
 ## 3. Login flow
 
 ```text
-/login gemini-acp
+/login antigravity-acp
   → spawn bundled CLI --acp
   → initialize
   → filter advertised auth methods to implemented set
@@ -74,7 +74,7 @@ Cancellation aborts authentication, closes the process, clears in-memory key buf
 
 ### Logout semantics
 
-Pi `/logout gemini-acp` removes Pi's key/marker. It cannot automatically delete Google credentials from Gemini's shared store through the generic Pi auth contract. Provide an explicit documented `/gemini-acp logout-upstream` only if the official CLI exposes a safe supported command/API and confirmation is clear. Never delete `~/.gemini` recursively.
+Pi `/logout antigravity-acp` removes Pi's key/marker. It cannot automatically delete Google credentials from Gemini's shared store through the generic Pi auth contract. Provide an explicit documented `/antigravity-acp logout-upstream` only if the official CLI exposes a safe supported command/API and confirmation is clear. Never delete `~/.gemini` recursively.
 
 ## 4. Permission broker
 

@@ -2,7 +2,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-import { GeminiAcpError } from "./errors.js";
+import { AntigravityAcpError } from "./errors.js";
 
 export interface AntigravityLaunch {
 	command: string;
@@ -32,22 +32,82 @@ export function resolveAntigravityAcpLaunch(): AntigravityLaunch {
 		if (executable(candidate)) return directOrWrapper(candidate, "path");
 	}
 
-	throw new GeminiAcpError(
+	throw new AntigravityAcpError(
 		"spawn",
 		"Google Antigravity ACP server is not installed. Install/enable agy ACP or set AGY_ACP_BIN.",
 	);
 }
 
+export type AntigravityAuthStatus =
+	| "api-key-env"
+	| "oauth-refreshable"
+	| "configured-not-authenticated"
+	| "corrupt"
+	| "missing";
+
+export interface AntigravityAuthHealth {
+	status: AntigravityAuthStatus;
+	authType?: string;
+	tokenFile: boolean;
+	settingsFile: boolean;
+}
+
+/** Structural local health only. A network probe is required to call an OAuth
+ * token valid; secret values are never returned or logged. */
+export function inspectAntigravityAuth(
+	directory = path.join(os.homedir(), ".gemini", "antigravity-acp"),
+): AntigravityAuthHealth {
+	const tokenPath = path.join(directory, "acp_token.json");
+	const settingsPath = path.join(directory, "settings.json");
+	const tokenFile = regularFile(tokenPath);
+	const settingsFile = regularFile(settingsPath);
+	let authType: string | undefined;
+	if (settingsFile) {
+		try {
+			const settings = JSON.parse(fs.readFileSync(settingsPath, "utf8")) as {
+				auth?: { type?: unknown };
+			};
+			if (typeof settings.auth?.type === "string") authType = settings.auth.type;
+		} catch {
+			return { status: "corrupt", tokenFile, settingsFile };
+		}
+	}
+	if (process.env.GEMINI_API_KEY) return { status: "api-key-env", authType: "gemini-api-key", tokenFile, settingsFile };
+	if (tokenFile) {
+		try {
+			const token = JSON.parse(fs.readFileSync(tokenPath, "utf8")) as { refresh_token?: unknown };
+			if (typeof token.refresh_token === "string" && token.refresh_token.length > 0) {
+				return { status: "oauth-refreshable", authType: authType ?? "oauth-personal", tokenFile, settingsFile };
+			}
+			return { status: "corrupt", ...(authType ? { authType } : {}), tokenFile, settingsFile };
+		} catch {
+			return { status: "corrupt", ...(authType ? { authType } : {}), tokenFile, settingsFile };
+		}
+	}
+	if (authType) return { status: "configured-not-authenticated", authType, tokenFile, settingsFile };
+	return { status: "missing", tokenFile, settingsFile };
+}
+
 export function hasAntigravityAuth(): boolean {
-	const directory = path.join(os.homedir(), ".gemini", "antigravity-acp");
-	if (regularFile(path.join(directory, "acp_token.json"))) return true;
+	const status = inspectAntigravityAuth().status;
+	return status === "api-key-env" || status === "oauth-refreshable";
+}
+
+/** Local logout. Google currently advertises logout as an agent command rather
+ * than an ACP SDK RPC, so this removes the local refresh token and auth choice. */
+export function clearAntigravityCredentials(
+	directory = path.join(os.homedir(), ".gemini", "antigravity-acp"),
+): void {
+	fs.rmSync(path.join(directory, "acp_token.json"), { force: true });
+	const settingsPath = path.join(directory, "settings.json");
 	try {
-		const settings = JSON.parse(fs.readFileSync(path.join(directory, "settings.json"), "utf8")) as {
-			auth?: { type?: unknown };
-		};
-		return typeof settings.auth?.type === "string";
+		const settings = JSON.parse(fs.readFileSync(settingsPath, "utf8")) as Record<string, unknown>;
+		delete settings.auth;
+		const temporary = `${settingsPath}.${process.pid}.tmp`;
+		fs.writeFileSync(temporary, `${JSON.stringify(settings, null, 2)}\n`, { mode: 0o600 });
+		fs.renameSync(temporary, settingsPath);
 	} catch {
-		return false;
+		fs.rmSync(settingsPath, { force: true });
 	}
 }
 

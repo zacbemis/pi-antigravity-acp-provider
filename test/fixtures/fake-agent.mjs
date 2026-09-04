@@ -50,8 +50,10 @@ for await (const line of rl) {
 					{ id: "api", name: "Gemini API key", _meta: { "api-key": { provider: "google" } } },
 				],
 				agentCapabilities: {
+					loadSession: true,
 					promptCapabilities: { image: true, embeddedContext: true },
 					mcpCapabilities: { http: true },
+					sessionCapabilities: { resume: {} },
 				},
 			},
 		});
@@ -79,6 +81,22 @@ for await (const line of rl) {
 						{ modelId: "gemini-test", name: "Gemini Test" },
 					],
 				},
+			},
+		});
+	} else if (method === "session/resume" || method === "session/load") {
+		send({
+			jsonrpc: "2.0",
+			id,
+			result: {
+				modes: {
+					currentModeId: mode,
+					availableModes: [
+						{ id: "default", name: "Default" },
+						{ id: "auto_edit", name: "Auto Edit" },
+						{ id: "yolo", name: "YOLO" },
+					],
+				},
+				models: { currentModelId: model, availableModels: [] },
 			},
 		});
 	} else if (method === "session/set_model") {

@@ -10,7 +10,7 @@ import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { Value } from "typebox/value";
 
-import { GeminiAcpError } from "../acp/errors.js";
+import { AntigravityAcpError } from "../acp/errors.js";
 import { PACKAGE_VERSION, PERMISSION_TOOL_NAME } from "../constants.js";
 
 const BODY_LIMIT = 1024 * 1024;
@@ -73,7 +73,7 @@ export class PiMcpBridge {
 			this.server?.listen(0, "127.0.0.1", resolve);
 		});
 		const address = this.server.address();
-		if (!address || typeof address === "string") throw new GeminiAcpError("spawn", "MCP bridge failed to bind");
+		if (!address || typeof address === "string") throw new AntigravityAcpError("spawn", "MCP bridge failed to bind");
 		this.url = `http://127.0.0.1:${address.port}/mcp`;
 		return this.descriptor();
 	}
@@ -87,7 +87,7 @@ export class PiMcpBridge {
 	}
 
 	private descriptor(): AcpMcpServer {
-		if (!this.url) throw new GeminiAcpError("spawn", "MCP bridge is not listening");
+		if (!this.url) throw new AntigravityAcpError("spawn", "MCP bridge is not listening");
 		return {
 			type: "http",
 			name: "pi-bridge",
@@ -107,7 +107,7 @@ export class PiMcpBridge {
 		}
 		const body = await readJson(request);
 		const protocol = new Server(
-			{ name: "pi-gemini-acp-tools", version: PACKAGE_VERSION },
+			{ name: "pi-antigravity-acp-tools", version: PACKAGE_VERSION },
 			{ capabilities: { tools: {} } },
 		);
 		protocol.setRequestHandler(ListToolsRequestSchema, () => ({
@@ -240,7 +240,7 @@ async function readJson(request: IncomingMessage): Promise<unknown> {
 	for await (const chunk of request) {
 		const bytes = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk as Uint8Array);
 		size += bytes.length;
-		if (size > BODY_LIMIT) throw new GeminiAcpError("invalid_input", "MCP request body is too large");
+		if (size > BODY_LIMIT) throw new AntigravityAcpError("invalid_input", "MCP request body is too large");
 		chunks.push(bytes);
 	}
 	return JSON.parse(Buffer.concat(chunks).toString("utf8"));

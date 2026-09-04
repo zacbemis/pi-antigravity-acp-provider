@@ -6,8 +6,8 @@ import { PiEventWriter } from "../src/stream/pi-events.js";
 const model: Model<Api> = {
 	id: "test",
 	name: "Test",
-	api: "gemini-acp",
-	provider: "gemini-acp",
+	api: "antigravity-acp",
+	provider: "antigravity-acp",
 	baseUrl: "",
 	reasoning: true,
 	input: ["text"],

@@ -1,4 +1,4 @@
-# pi-gemini-acp-provider
+# pi-antigravity-acp-provider
 
 A first-class [Pi](https://github.com/earendil-works/pi) provider for **Google Antigravity** through its official ACP server.
 
@@ -6,21 +6,22 @@ A first-class [Pi](https://github.com/earendil-works/pi) provider for **Google A
 
 ## Features
 
-- Registers `gemini-acp/*` models backed by Google Antigravity.
+- Registers `antigravity-acp/*` models backed by Google Antigravity.
 - Uses ACP protocol v1 and the official TypeScript SDK.
 - Collapses Antigravity's effort-qualified IDs into one entry per model; Pi's Shift+Tab reasoning control selects low/medium/high dynamically.
-- Supports Pi streaming, warm sessions, cancellation, usage metadata, and lifecycle cleanup.
+- Supports Pi streaming, cancellation, usage/quota metadata, lifecycle cleanup, and persisted ACP session restoration across Pi restarts.
 - Routes compatible Pi tools through an authenticated loopback MCP bridge.
 - Supports persisted `default`, `auto-edit`, and `yolo` Antigravity permission modes. The requested default is `yolo`; switching to a prompting mode retains the single-use, fail-closed Pi permission broker.
 - Advertises no ACP filesystem or terminal client capabilities.
-- Uses a self-service ACP registry installer based on the reviewed `@estebanforge/pi-antigravity-bridge` setup when the official server is absent.
+- Provides setup, auth-health, logout/account-switching, qualification, quota, and runtime-update commands.
+- Uses a self-service ACP registry installer with exact pinned Google artifact URLs, streaming SHA-256 recording, Linux x64 binary verification, musl rejection, macOS quarantine cleanup, and Windows process-tree handling.
 
 ## New-user setup
 
 The npm name is not published yet. From a checkout:
 
 ```bash
-cd pi-gemini-acp-provider
+cd pi-antigravity-acp-provider
 npm install
 pi install .
 pi
@@ -35,19 +36,21 @@ pi --no-extensions -e ./extensions/index.ts
 Once the package is published, installation will be:
 
 ```bash
-pi install npm:pi-gemini-acp-provider
+pi install npm:pi-antigravity-acp-provider
 ```
 
 In Pi:
 
-1. Run `/login`.
-2. Choose **Sign in with an account**.
-3. Choose **Google Antigravity (ACP)**.
-4. If needed, wait for the official ACP server download and extraction. Progress is shown; the Linux build observed during development expands to about 1.8 GB.
-5. Complete the Google login in the browser.
-6. Run `/model` and select one of the `gemini-acp` models.
-7. Press **Shift+Tab** to choose the reasoning effort. Flash models expose low, medium, and high; Pro exposes only the tiers advertised by Antigravity.
-8. Send a prompt. The default permission mode is `yolo`, so Antigravity-native commands and edits can run without confirmation.
+1. Optionally run `/antigravity-acp setup` for a runtime/auth preflight.
+2. Run `/login`.
+3. Choose **Sign in with an account**.
+4. Choose **Google Antigravity (ACP)**.
+5. If needed, wait for the official ACP server download and extraction. Progress is shown; the Linux build observed during development expands to about 1.8 GB.
+6. Complete the Google login in the browser.
+7. Run `/antigravity-acp setup` again to perform a network auth probe and model discovery.
+8. Run `/model` and select one of the `antigravity-acp` models.
+9. Press **Shift+Tab** to choose the reasoning effort. Flash models expose low, medium, and high; Pro exposes only the tiers advertised by Antigravity.
+10. Send a prompt. The default permission mode is `yolo`, so Antigravity-native commands and edits can run without confirmation.
 
 The provider first looks at `AGY_ACP_BIN`, `~/.local/bin/agy_acp_server.par`, the managed `~/.local/opt/agy-acp/current/` location, and `PATH`. If absent, it installs the platform build published in the ACP registry. A global `agy` or `gemini` command is not required.
 
@@ -58,15 +61,24 @@ Antigravity owns OAuth tokens under `~/.gemini/antigravity-acp/`; Pi stores only
 ## Commands
 
 ```text
-/gemini-acp doctor
-/gemini-acp doctor --verbose
-/gemini-acp permissions
-/gemini-acp permissions default
-/gemini-acp permissions auto-edit
-/gemini-acp permissions yolo
+/antigravity-acp setup
+/antigravity-acp doctor
+/antigravity-acp doctor --verbose
+/antigravity-acp status
+/antigravity-acp quota
+/antigravity-acp update
+/antigravity-acp qualify
+/antigravity-acp logout
+/antigravity-acp account
+/antigravity-acp permissions
+/antigravity-acp permissions default
+/antigravity-acp permissions auto-edit
+/antigravity-acp permissions yolo
 ```
 
-Permission mode is saved in `~/.pi/agent/gemini-acp-provider/config.json` and applied immediately to active compatible sessions as well as future sessions.
+Permission mode is saved in `~/.pi/agent/antigravity-acp-provider/config.json` and applied immediately to active compatible sessions as well as future sessions. ACP session bindings are saved beside it in `sessions.json`.
+
+`logout`/`account` clears local Antigravity credentials and saved ACP sessions. Run Pi's `/logout` afterward to remove the Pi credential marker, then `/login` for the new account. `update` only installs the runtime version pinned by this package; install a newer provider release to trust a newer upstream runtime.
 
 ## Development
 
@@ -74,17 +86,18 @@ Permission mode is saved in `~/.pi/agent/gemini-acp-provider/config.json` and ap
 npm run check
 npm run test:real-acp  # initializes the installed Antigravity ACP server
 npm run test:live      # sends a real authenticated prompt
+npm run test:qualify   # live cancel, restore, MCP, model, and permission qualification
 npm run test:packed
 npm audit --audit-level=high
 ```
 
 ## Security boundary
 
-This launches a full coding agent with the user's OS privileges. **The default `yolo` mode permits Antigravity-native commands and edits without confirmation.** Use `/gemini-acp permissions default` for confirmation prompts. Disabling ACP filesystem/terminal **client callbacks is not a sandbox** for Antigravity-native tools. Pi hooks govern tools routed through the `pi_` MCP namespace; Antigravity-native tools remain governed by Antigravity policy and ACP permission requests.
+This launches a full coding agent with the user's OS privileges. **The default `yolo` mode permits Antigravity-native commands and edits without confirmation.** Use `/antigravity-acp permissions default` for confirmation prompts. Disabling ACP filesystem/terminal **client callbacks is not a sandbox** for Antigravity-native tools. Pi hooks govern tools routed through the `pi_` MCP namespace; Antigravity-native tools remain governed by Antigravity policy and ACP permission requests.
 
 ## Compatibility
 
-The implementation is pinned to Pi 0.85.0, ACP SDK 0.16.1, the reviewed `@estebanforge/pi-antigravity-bridge` 1.4.1 setup behavior, and ACP protocol 1. The live development environment reported `antigravity-acp` build `agy_acp_server_1.1.1`.
+The implementation is pinned to Pi 0.85.0, ACP SDK 0.16.1, Antigravity ACP 1.1.1, and ACP protocol 1. The official registry currently provides Linux x64/ARM64, Windows x64/ARM64, and macOS ARM64 artifacts. Intel macOS has no pinned artifact, and Alpine/musl is rejected because Google's Linux build targets glibc.
 
 Earlier repository documents analyzing `@google/gemini-cli@0.58.0` describe the superseded implementation and are retained only as historical research. See [`docs/ANTIGRAVITY-MIGRATION.md`](docs/ANTIGRAVITY-MIGRATION.md).
 

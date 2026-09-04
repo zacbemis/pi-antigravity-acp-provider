@@ -11,8 +11,14 @@ import type { Context, Model, SimpleStreamOptions, ToolResultMessage } from "@ea
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { createHash } from "node:crypto";
 
-import { GeminiAcpConnection, type GeminiConnectionOptions } from "./acp/connection.js";
-import { abortError, GeminiAcpError } from "./acp/errors.js";
+import {
+	clearAntigravityCredentials,
+	inspectAntigravityAuth,
+	type AntigravityAuthHealth,
+} from "./acp/antigravity.js";
+import { AntigravityAcpConnection, type AntigravityConnectionOptions } from "./acp/connection.js";
+import { abortError, AntigravityAcpError } from "./acp/errors.js";
+import { AcpSessionStore } from "./acp/session-store.js";
 import {
 	MANAGED_AUTH_MARKER,
 	PERMISSION_RESULT_KIND,
@@ -31,12 +37,13 @@ import { resolveAcpModelId } from "./models.js";
 import { type PromptParts, buildPromptParts } from "./stream/context.js";
 import { PiEventWriter } from "./stream/pi-events.js";
 import { usageFromPrompt } from "./stream/usage.js";
+import { RuntimeMetrics } from "./status.js";
 
 const PERMISSION_TIMEOUT_MS = 120_000;
 const TOOL_TIMEOUT_MS = 120_000;
 const TOOL_BATCH_MS = 100;
 
-type GeminiModel = Model<"gemini-acp">;
+type AntigravityModel = Model<"antigravity-acp">;
 
 interface PendingPermission {
 	id: string;
@@ -54,7 +61,7 @@ interface PendingPiTool {
 interface Binding {
 	key: string;
 	cwd: string;
-	connection: GeminiAcpConnection;
+	connection: AntigravityAcpConnection;
 	initialize: InitializeResponse;
 	session: NewSessionResponse;
 	modelId: string;
@@ -72,6 +79,8 @@ interface Binding {
 	toolFingerprint: string;
 	turnCompletion: Promise<void> | undefined;
 	abortRequested: boolean;
+	piSessionId: string | undefined;
+	restored: boolean;
 }
 
 export interface PermissionView {
@@ -90,6 +99,7 @@ export interface PermissionToolResult {
 export interface RuntimeSnapshot {
 	bindings: number;
 	permissionMode: PermissionMode;
+	metrics: ReturnType<RuntimeMetrics["snapshot"]>;
 	processes: Array<{
 		key: string;
 		pid?: number;
@@ -101,28 +111,36 @@ export interface RuntimeSnapshot {
 		waitingForTools: number;
 		agentVersion: string | undefined;
 		mcpHttp: boolean;
+		restored: boolean;
 		stderrTail?: string;
 	}>;
 }
 
-export type GeminiConnectionFactory = (options: GeminiConnectionOptions) => GeminiAcpConnection;
+export type AntigravityConnectionFactory = (options: AntigravityConnectionOptions) => AntigravityAcpConnection;
 
-export class GeminiRuntime {
+export class AntigravityRuntime {
 	private readonly bindings = new Map<string, Promise<Binding>>();
 	private readonly resolvedBindings = new Set<Binding>();
 	private disposed = false;
 
-	private readonly connectionFactory: GeminiConnectionFactory;
+	private readonly connectionFactory: AntigravityConnectionFactory;
 	private readonly ensureAgent: boolean;
+	private readonly sessionStore: AcpSessionStore | undefined;
+	private readonly metrics = new RuntimeMetrics();
 	private permissionMode: PermissionMode;
 
-	constructor(connectionFactory?: GeminiConnectionFactory, permissionMode: PermissionMode = "yolo") {
-		this.connectionFactory = connectionFactory ?? ((options) => new GeminiAcpConnection(options));
+	constructor(
+		connectionFactory?: AntigravityConnectionFactory,
+		permissionMode: PermissionMode = "yolo",
+		sessionStore?: AcpSessionStore,
+	) {
+		this.connectionFactory = connectionFactory ?? ((options) => new AntigravityAcpConnection(options));
 		this.ensureAgent = connectionFactory === undefined;
 		this.permissionMode = permissionMode;
+		this.sessionStore = sessionStore ?? (this.ensureAgent ? new AcpSessionStore() : undefined);
 	}
 
-	stream(model: GeminiModel, context: Context, options: SimpleStreamOptions = {}): PiEventWriter {
+	stream(model: AntigravityModel, context: Context, options: SimpleStreamOptions = {}): PiEventWriter {
 		const writer = new PiEventWriter(model);
 		void this.runQueued(model, context, options, writer).catch((error: unknown) => {
 			writer.fail(error, options.signal?.aborted === true || isAbort(error));
@@ -158,7 +176,7 @@ export class GeminiRuntime {
 					`${candidate.id} ${candidate.name}`,
 				),
 			);
-			if (!method) throw new GeminiAcpError("auth", "Antigravity ACP did not advertise Google login");
+			if (!method) throw new AntigravityAcpError("auth", "Antigravity ACP did not advertise Google login");
 			await connection.authenticate({ methodId: method.id }, signal);
 			await connection.newSession(process.cwd(), signal);
 		} finally {
@@ -181,6 +199,22 @@ export class GeminiRuntime {
 		} finally {
 			await connection.close();
 		}
+	}
+
+	async authHealth(apiKey?: string): Promise<AntigravityAuthHealth & { networkValid?: boolean; error?: string }> {
+		const local = inspectAntigravityAuth();
+		try {
+			await this.discoverModels(apiKey ?? (hasUsableLocalAuth(local) ? MANAGED_AUTH_MARKER : undefined));
+			return { ...local, networkValid: true };
+		} catch (error) {
+			return { ...local, networkValid: false, error: error instanceof Error ? error.message : String(error) };
+		}
+	}
+
+	async logout(): Promise<void> {
+		await this.closeBindings();
+		this.sessionStore?.clear();
+		clearAntigravityCredentials();
 	}
 
 	async setPermissionMode(mode: PermissionMode): Promise<void> {
@@ -217,16 +251,26 @@ export class GeminiRuntime {
 					waitingForTools: binding.pendingTools.size,
 					agentVersion: binding.initialize.agentInfo?.version,
 					mcpHttp: binding.initialize.agentCapabilities?.mcpCapabilities?.http === true,
+					restored: binding.restored,
 					...(includeStderr ? { stderrTail: binding.connection.process.stderrTail } : {}),
 				};
 			}),
 		);
-		return { bindings: this.bindings.size, permissionMode: this.permissionMode, processes };
+		return {
+			bindings: this.bindings.size,
+			permissionMode: this.permissionMode,
+			metrics: this.metrics.snapshot(),
+			processes,
+		};
 	}
 
 	async close(): Promise<void> {
 		if (this.disposed) return;
 		this.disposed = true;
+		await this.closeBindings();
+	}
+
+	private async closeBindings(): Promise<void> {
 		const pending = [...this.bindings.values()];
 		this.bindings.clear();
 		for (const binding of this.resolvedBindings) {
@@ -246,7 +290,7 @@ export class GeminiRuntime {
 	}
 
 	private async runQueued(
-		model: GeminiModel,
+		model: AntigravityModel,
 		context: Context,
 		options: SimpleStreamOptions,
 		writer: PiEventWriter,
@@ -262,7 +306,7 @@ export class GeminiRuntime {
 		let binding = await this.getBinding(key, model, acpModelId, options.apiKey, writer, tools, options.signal);
 
 		// A permission tool result resumes the still-running ACP prompt rather than
-		// starting a second Gemini turn.
+		// starting a second Antigravity turn.
 		if (binding.permission) {
 			const pending = binding.permission;
 			const result = findPermissionResult(context, pending.id);
@@ -332,6 +376,7 @@ export class GeminiRuntime {
 				messagesFingerprint(context.messages.slice(0, binding.messageCount)) !==
 					binding.historyFingerprint
 			) {
+				if (binding.piSessionId) this.sessionStore?.remove(binding.piSessionId);
 				await this.dropBinding(key, binding);
 				binding = await this.getBinding(key, model, acpModelId, options.apiKey, writer, tools, options.signal);
 			}
@@ -366,11 +411,14 @@ export class GeminiRuntime {
 			);
 			const activeWriter = binding.writer ?? writer;
 			if (binding.abortRequested) throw abortError();
-			activeWriter.message.usage = usageFromPrompt(response);
+			const usage = usageFromPrompt(response);
+			activeWriter.message.usage = usage;
+			this.metrics.record(response, usage);
 			activeWriter.message.rawStopReason = response.stopReason;
 			binding.messageCount = binding.pendingContextCount || parts.messageCount;
 			binding.historyFingerprint = binding.pendingContextFingerprint;
 			binding.expectedAssistantFingerprint = messageFingerprint(activeWriter.message);
+			this.persistBinding(binding);
 			switch (response.stopReason) {
 				case "cancelled":
 					throw abortError();
@@ -435,7 +483,7 @@ export class GeminiRuntime {
 
 	private async getBinding(
 		key: string,
-		model: GeminiModel,
+		model: AntigravityModel,
 		acpModelId: string,
 		apiKey: string | undefined,
 		writer: PiEventWriter,
@@ -454,7 +502,7 @@ export class GeminiRuntime {
 
 	private async createBinding(
 		key: string,
-		model: GeminiModel,
+		model: AntigravityModel,
 		acpModelId: string,
 		apiKey: string | undefined,
 		writer: PiEventWriter,
@@ -482,22 +530,47 @@ export class GeminiRuntime {
 				});
 				mcpServer = await bridge.start();
 			}
-			const session = await connection.newSession(cwd, signal, mcpServer ? [mcpServer] : []);
+			const mcpServers = mcpServer ? [mcpServer] : [];
+			const piSessionId = key.startsWith("sid:") ? key.slice(4) : undefined;
+			const saved = piSessionId ? this.sessionStore?.get(piSessionId) : undefined;
+			let session: NewSessionResponse | undefined;
+			let restored = false;
+			if (saved?.cwd === cwd) {
+				if (initialize.agentCapabilities?.sessionCapabilities?.resume) {
+					try {
+						const resumed = await connection.resumeSession(saved.acpSessionId, cwd, mcpServers, signal);
+						session = { sessionId: saved.acpSessionId, ...resumed };
+						restored = true;
+					} catch {
+						// Some Antigravity builds advertise the draft method before implementing it.
+					}
+				}
+				if (!session && initialize.agentCapabilities?.loadSession === true) {
+					try {
+						const loaded = await connection.loadSession(saved.acpSessionId, cwd, mcpServers, signal);
+						session = { sessionId: saved.acpSessionId, ...loaded };
+						restored = true;
+					} catch {
+						this.sessionStore?.remove(saved.piSessionId);
+					}
+				}
+			}
+			session ??= await connection.newSession(cwd, signal, mcpServers);
 			if (supportsMode(session, this.permissionMode) && session.modes?.currentModeId !== this.permissionMode) {
 				await connection.setMode(session.sessionId, this.permissionMode, signal);
 			}
 			const currentModel = session.models?.currentModelId;
 			if (currentModel !== acpModelId) await connection.setModel(session.sessionId, acpModelId, signal);
-			binding = {
+			const createdBinding: Binding = {
 				key,
 				cwd,
 				connection,
 				initialize,
 				session,
 				modelId: acpModelId,
-				messageCount: 0,
-				historyFingerprint: messagesFingerprint([]),
-				expectedAssistantFingerprint: undefined,
+				messageCount: restored && saved ? saved.messageCount : 0,
+				historyFingerprint: restored && saved ? saved.historyFingerprint : messagesFingerprint([]),
+				expectedAssistantFingerprint: restored ? saved?.expectedAssistantFingerprint : undefined,
 				pendingContextCount: 0,
 				pendingContextFingerprint: messagesFingerprint([]),
 				queue: Promise.resolve(),
@@ -509,19 +582,39 @@ export class GeminiRuntime {
 				toolFingerprint: piToolFingerprint(tools),
 				turnCompletion: undefined,
 				abortRequested: false,
+				piSessionId,
+				restored,
 			};
-			this.resolvedBindings.add(binding);
+			binding = createdBinding;
+			this.persistBinding(createdBinding);
+			this.resolvedBindings.add(createdBinding);
 			void connection.process.exited.then(() => {
-				this.resolvedBindings.delete(binding as Binding);
+				this.resolvedBindings.delete(createdBinding);
 				void bridge?.close();
 				const current = this.bindings.get(key);
-				if (current) void current.then((value) => value === binding && this.bindings.delete(key));
+				if (current) void current.then((value) => value === createdBinding && this.bindings.delete(key));
 			});
-			return binding;
+			return createdBinding;
 		} catch (error) {
 			await Promise.allSettled([connection.close(), bridge?.close() ?? Promise.resolve()]);
 			throw error;
 		}
+	}
+
+	private persistBinding(binding: Binding): void {
+		if (!binding.piSessionId) return;
+		this.sessionStore?.save({
+			piSessionId: binding.piSessionId,
+			acpSessionId: binding.session.sessionId,
+			acpModelId: binding.modelId,
+			cwd: binding.cwd,
+			messageCount: binding.messageCount,
+			historyFingerprint: binding.historyFingerprint,
+			...(binding.expectedAssistantFingerprint
+				? { expectedAssistantFingerprint: binding.expectedAssistantFingerprint }
+				: {}),
+			lastActive: Date.now(),
+		});
 	}
 
 	private requestPiTool(
@@ -586,17 +679,17 @@ export class GeminiRuntime {
 		if (current && (await current) === binding) this.bindings.delete(key);
 		this.resolvedBindings.delete(binding);
 		cancelPermission(binding);
-		cancelPiTools(binding, "Gemini session closed before Pi returned the tool result");
+		cancelPiTools(binding, "Antigravity session closed before Pi returned the tool result");
 		await Promise.allSettled([binding.connection.close(), binding.bridge?.close() ?? Promise.resolve()]);
 	}
 
 	private assertActive(): void {
-		if (this.disposed) throw new GeminiAcpError("process_exit", "Gemini ACP runtime is closed");
+		if (this.disposed) throw new AntigravityAcpError("process_exit", "Antigravity ACP runtime is closed");
 	}
 }
 
 async function authenticateForCredential(
-	connection: GeminiAcpConnection,
+	connection: AntigravityAcpConnection,
 	initialize: InitializeResponse,
 	apiKey: string | undefined,
 	signal?: AbortSignal,
@@ -606,7 +699,7 @@ async function authenticateForCredential(
 		const meta = candidate._meta as Record<string, unknown> | null | undefined;
 		return "api-key" in (meta ?? {}) || /api key/iu.test(candidate.name);
 	});
-	if (!method) throw new GeminiAcpError("auth", "Antigravity ACP did not advertise API-key authentication");
+	if (!method) throw new AntigravityAcpError("auth", "Antigravity ACP did not advertise API-key authentication");
 	await connection.authenticate({ methodId: method.id, _meta: { "api-key": apiKey } }, signal);
 }
 
@@ -615,7 +708,7 @@ function adaptPromptToCapabilities(parts: PromptParts, initialize: InitializeRes
 	const output: ContentBlock[] = [];
 	for (const block of parts.prompt) {
 		if (block.type === "image" && capabilities?.image !== true) {
-			throw new GeminiAcpError("invalid_input", "This Gemini ACP runtime did not advertise image input");
+			throw new AntigravityAcpError("invalid_input", "This Antigravity ACP runtime did not advertise image input");
 		}
 		if (block.type === "resource" && capabilities?.embeddedContext !== true) {
 			const resource = block.resource;
@@ -625,6 +718,10 @@ function adaptPromptToCapabilities(parts: PromptParts, initialize: InitializeRes
 		output.push(block);
 	}
 	return { ...parts, prompt: output };
+}
+
+function hasUsableLocalAuth(health: AntigravityAuthHealth): boolean {
+	return health.status === "api-key-env" || health.status === "oauth-refreshable";
 }
 
 function supportsMode(session: NewSessionResponse, mode: PermissionMode): boolean {
@@ -642,7 +739,7 @@ function permissionView(permission: PendingPermission): PermissionView {
 	const visibleDetails = JSON.stringify(details, null, 2).slice(0, 8_000);
 	return {
 		id: permission.id,
-		title: `${call.title ?? "Gemini requests permission"}\n\n${visibleDetails}`,
+		title: `${call.title ?? "Antigravity requests permission"}\n\n${visibleDetails}`,
 		options: permission.request.options.map((option) => ({
 			id: option.optionId,
 			label: option.name,
@@ -767,7 +864,7 @@ function cancelPiTools(binding: Binding, reason: string): void {
 }
 
 function isAbort(error: unknown): boolean {
-	return error instanceof GeminiAcpError
+	return error instanceof AntigravityAcpError
 		? error.code === "aborted"
 		: error instanceof DOMException && error.name === "AbortError";
 }

@@ -12,7 +12,7 @@ afterEach(() => {
 
 describe("permission configuration", () => {
 	it("defaults to yolo and persists an explicit safer mode", () => {
-		const directory = fs.mkdtempSync(path.join(os.tmpdir(), "gemini-acp-config-"));
+		const directory = fs.mkdtempSync(path.join(os.tmpdir(), "antigravity-acp-config-"));
 		directories.push(directory);
 		const file = path.join(directory, "nested", "config.json");
 		expect(loadConfig(file).permissions).toBe("yolo");
