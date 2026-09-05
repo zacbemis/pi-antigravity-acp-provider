@@ -23,8 +23,29 @@ describe("boundedNdjsonStream", () => {
 		expect(values[0]).toMatchObject({ id: 1, result: {} });
 	});
 
+	it("ignores the exact Chromium browser reuse status line", async () => {
+		const ignored: string[] = [];
+		const input = bytes(
+			'Opening in existing browser session.\r\n{"jsonrpc":"2.0","id":1,"result":{}}\n',
+		);
+		const stream = boundedNdjsonStream(new WritableStream<Uint8Array>(), input, {
+			onCompatibilityNoise: (line) => ignored.push(line),
+		});
+		const values: AnyMessage[] = [];
+		for await (const value of stream.readable) values.push(value);
+		expect(values).toEqual([{ jsonrpc: "2.0", id: 1, result: {} }]);
+		expect(ignored).toEqual(["Opening in existing browser session."]);
+	});
+
 	it("rejects malformed JSON", async () => {
 		const input = bytes("not-json\n");
+		const stream = boundedNdjsonStream(new WritableStream<Uint8Array>(), input);
+		const reader = stream.readable.getReader();
+		await expect(reader.read()).rejects.toThrow("malformed JSON");
+	});
+
+	it("does not ignore similar non-protocol output", async () => {
+		const input = bytes("Opening in existing browser session. unexpected\n");
 		const stream = boundedNdjsonStream(new WritableStream<Uint8Array>(), input);
 		const reader = stream.readable.getReader();
 		await expect(reader.read()).rejects.toThrow("malformed JSON");

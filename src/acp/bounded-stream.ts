@@ -5,6 +5,8 @@ export const DEFAULT_MAX_FRAME_BYTES = 32 * 1024 * 1024;
 export interface BoundedNdjsonOptions {
 	maxFrameBytes?: number;
 	onProtocolError?: (error: Error) => void;
+	onCompatibilityNoise?: (line: string) => void;
+	closeOnProtocolError?: boolean;
 }
 
 /**
@@ -45,7 +47,7 @@ export function boundedNdjsonStream(
 						if (frame.byteLength > maxFrameBytes) {
 							throw new Error(`ACP frame exceeds ${maxFrameBytes} bytes`);
 						}
-						enqueueFrame(frame, decoder, controller);
+						enqueueFrame(frame, decoder, controller, options.onCompatibilityNoise);
 					}
 				}
 
@@ -53,13 +55,17 @@ export function boundedNdjsonStream(
 					if (pending.byteLength > maxFrameBytes) {
 						throw new Error(`ACP frame exceeds ${maxFrameBytes} bytes`);
 					}
-					enqueueFrame(pending, decoder, controller);
+					enqueueFrame(pending, decoder, controller, options.onCompatibilityNoise);
 				}
 				controller.close();
 			} catch (cause) {
 				const error = cause instanceof Error ? cause : new Error(String(cause));
 				options.onProtocolError?.(error);
-				controller.error(error);
+				// ACP SDK 0.16.1 starts its receive loop without observing the
+				// returned promise. Closing lets its loop settle cleanly while the
+				// connection races requests against onProtocolError.
+				if (options.closeOnProtocolError) controller.close();
+				else controller.error(error);
 			} finally {
 				reader.releaseLock();
 			}
@@ -107,10 +113,15 @@ function enqueueFrame(
 	bytes: Uint8Array<ArrayBufferLike>,
 	decoder: TextDecoder,
 	controller: ReadableStreamDefaultController<AnyMessage>,
+	onCompatibilityNoise?: (line: string) => void,
 ): void {
 	let text = decoder.decode(bytes);
 	if (text.endsWith("\r")) text = text.slice(0, -1);
 	if (!text.trim()) return;
+	if (isKnownCompatibilityNoise(text)) {
+		onCompatibilityNoise?.(text);
+		return;
+	}
 
 	let value: unknown;
 	try {
@@ -120,6 +131,13 @@ function enqueueFrame(
 	}
 	if (!isMessage(value)) throw new Error("Antigravity ACP emitted an invalid JSON-RPC message");
 	controller.enqueue(value);
+}
+
+function isKnownCompatibilityNoise(text: string): boolean {
+	// Chromium writes this exact status line to inherited stdout when an OAuth
+	// URL is opened in an already-running browser. Antigravity currently lets
+	// that child output share its otherwise NDJSON-only stdout stream.
+	return text.trim() === "Opening in existing browser session.";
 }
 
 function isMessage(value: unknown): value is AnyMessage {
