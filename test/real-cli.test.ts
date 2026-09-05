@@ -1,6 +1,10 @@
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import { describe, expect, it } from "vitest";
 
 import { AntigravityAcpConnection } from "../src/acp/connection.js";
+import { HeadlessOAuthRelay } from "../src/acp/headless-oauth.js";
 import { resolveAntigravityAcpEntry } from "../src/acp/process.js";
 
 const enabled = process.env.PI_ANTIGRAVITY_ACP_REAL === "1";
@@ -21,4 +25,35 @@ describe.skipIf(!enabled)("Google Antigravity ACP contract", () => {
 			await connection.close();
 		}
 	}, 60_000);
+
+	it.skipIf(process.platform === "win32")("captures the real headless OAuth authorization URL", async () => {
+		const home = fs.mkdtempSync(path.join(os.tmpdir(), "antigravity-headless-contract-"));
+		const relay = new HeadlessOAuthRelay({ ...process.env, HOME: home });
+		const controller = new AbortController();
+		const connection = new AntigravityAcpConnection({
+			cwd: process.cwd(),
+			env: relay.env,
+			initializeTimeoutMs: 45_000,
+		});
+		try {
+			const initialize = await connection.initialize();
+			const method = initialize.authMethods?.find((candidate) => candidate.id === "oauth-personal");
+			expect(method).toBeDefined();
+			const authentication = connection.authenticate(
+				{ methodId: method!.id },
+				controller.signal,
+				60_000,
+			);
+			const captured = await relay.waitForAuthorization(controller.signal);
+			expect(captured.url).toMatch(/^https:\/\/accounts\.google\.com\/o\/oauth2\/v2\/auth/u);
+			expect(captured.redirectUrl.hostname).toBe("127.0.0.1");
+			controller.abort();
+			await expect(authentication).rejects.toMatchObject({ code: "aborted" });
+		} finally {
+			controller.abort();
+			relay.dispose();
+			await connection.close();
+			fs.rmSync(home, { recursive: true, force: true });
+		}
+	}, 90_000);
 });

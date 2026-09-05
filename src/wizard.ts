@@ -26,7 +26,22 @@ export async function runSetupWizard(
 			);
 			return;
 		}
-		await runtime.loginGoogle(undefined, (message) => ui.notify(message, "info"));
+		await runtime.loginGoogle(
+			undefined,
+			(message) => ui.notify(message, "info"),
+			{
+				showAuthorizationUrl: (url, instructions) => ui.notify(`${instructions}\n${url}`, "info"),
+				promptForCallback: async (signal) => {
+					const value = await ui.input(
+						"Paste the final localhost callback URL (or authorization code)",
+						"http://127.0.0.1:PORT/?state=…&code=…",
+						{ signal },
+					);
+					if (!value) throw new Error("Antigravity OAuth login cancelled");
+					return value;
+				},
+			},
+		);
 		localAuth = inspectAntigravityAuth();
 	}
 

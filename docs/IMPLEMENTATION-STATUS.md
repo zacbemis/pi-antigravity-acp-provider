@@ -1,6 +1,6 @@
 # Implementation status
 
-Status as of 2026-09-05 for package version 0.1.4.
+Status as of 2026-09-05 for package version 0.1.5.
 
 The bundled Gemini CLI implementation was superseded after its individual Code Assist authentication path was retired. See [ANTIGRAVITY-MIGRATION.md](ANTIGRAVITY-MIGRATION.md).
 
@@ -11,7 +11,7 @@ The bundled Gemini CLI implementation was superseded after its individual Code A
 - Official ACP SDK 0.16.1 transport using stable protocol v1.
 - Strict bounded NDJSON framing, operation deadlines, cancellation, redacted errors, and bounded stderr. The exact Chromium `Opening in existing browser session.` compatibility line is filtered and counted without weakening rejection of other non-protocol stdout; genuine framing failures reject active operations without escaping through the SDK as uncaught exceptions.
 - Packaged parent-death supervisor with TERM/KILL escalation and POSIX process-group cleanup.
-- Antigravity Google/API-key `/login`, structural local auth health, network validation through setup/qualification, local logout, and account-switch reset flow.
+- Antigravity Google/API-key `/login`, automatic SSH/headless OAuth URL capture and validated loopback-callback relay, structural local auth health, network validation through setup/qualification, local logout, and account-switch reset flow.
 - Antigravity fallback models, authenticated ACP model discovery, catalog refresh, and `session/set_model` switching.
 - Pi-to-ACP text/image/context conversion with bounded fresh-session reconstruction.
 - ACP text, thought, plan, and native-tool activity mapping to balanced Pi events.
@@ -36,4 +36,4 @@ On Linux with authenticated `agy_acp_server_1.1.1`, ACP protocol 1 initializatio
 - Confirm transcript prefix fingerprints and unseen external-delta replay against real Pi branch/fork/compaction behavior.
 - Complete public beta publishing and Pi marketplace installation verification.
 
-Version 0.1.4 remains a beta implementation.
+Version 0.1.5 remains a beta implementation.

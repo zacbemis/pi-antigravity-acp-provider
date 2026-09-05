@@ -29,8 +29,25 @@ export function createAntigravityProvider(runtime = new AntigravityRuntime()): A
 				loginLabel: "Sign in with Google",
 				async login(interaction) {
 					interaction.notify({ type: "progress", message: "Starting Antigravity Google login…" });
-					await runtime.loginGoogle(interaction.signal, (message) =>
-						interaction.notify({ type: "progress", message }),
+					await runtime.loginGoogle(
+						interaction.signal,
+						(message) => interaction.notify({ type: "progress", message }),
+						{
+							showAuthorizationUrl(url, instructions) {
+								interaction.notify({
+									type: "info",
+									message: instructions,
+									links: [{ url, label: "Google authorization" }],
+								});
+							},
+							promptForCallback: (signal) =>
+								interaction.prompt({
+									type: "manual_code",
+									message: "Paste the final localhost callback URL (or authorization code):",
+									placeholder: "http://127.0.0.1:PORT/?state=…&code=…",
+									signal,
+								}),
+						},
 					);
 					return {
 						type: "oauth",

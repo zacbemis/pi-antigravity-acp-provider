@@ -105,10 +105,14 @@ export class AntigravityAcpConnection {
 		return response;
 	}
 
-	async authenticate(request: AuthenticateRequest, signal?: AbortSignal): Promise<void> {
+	async authenticate(
+		request: AuthenticateRequest,
+		signal?: AbortSignal,
+		timeoutMs = 180_000,
+	): Promise<void> {
 		await this.initialize();
 		await this.withAbort(
-			this.withDeadline(this.connection.authenticate(request), 180_000, "authenticate"),
+			this.withDeadline(this.connection.authenticate(request), timeoutMs, "authenticate"),
 			signal,
 		);
 	}
