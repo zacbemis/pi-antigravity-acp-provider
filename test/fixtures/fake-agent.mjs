@@ -3,6 +3,7 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 
 const rl = readline.createInterface({ input: process.stdin, crlfDelay: Infinity });
+const scenario = process.argv[2];
 const send = (value) => process.stdout.write(`${JSON.stringify(value)}\n`);
 let model = "auto";
 let mode = "default";
@@ -39,6 +40,13 @@ for await (const line of rl) {
 		send({ jsonrpc: "2.0", id: permissionPromptId, result: { stopReason: "end_turn" } });
 		permissionPromptId = undefined;
 	} else if (method === "initialize") {
+		if (scenario === "malformed-output") {
+			process.stdout.write("not-json\n");
+			continue;
+		}
+		if (scenario === "browser-noise") {
+			process.stdout.write("Opening in existing browser session.\n");
+		}
 		send({
 			jsonrpc: "2.0",
 			id,

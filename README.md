@@ -94,6 +94,8 @@ This launches a full coding agent with the user's OS privileges. **The default `
 
 The implementation is pinned to Pi 0.85.0, ACP SDK 0.16.1, Antigravity ACP 1.1.1, and ACP protocol 1. The official registry currently provides Linux x64/ARM64, Windows x64/ARM64, and macOS ARM64 artifacts. Intel macOS has no pinned artifact, and Alpine/musl is rejected because Google's Linux build targets glibc.
 
+During browser authentication, Chromium may write `Opening in existing browser session.` to the ACP process's inherited stdout. The transport ignores only that exact known compatibility line and reports its count in `doctor`; all other non-JSON stdout remains a fatal protocol error.
+
 Earlier repository documents analyzing `@google/gemini-cli@0.58.0` describe the superseded implementation and are retained only as historical research. See [`docs/ANTIGRAVITY-MIGRATION.md`](docs/ANTIGRAVITY-MIGRATION.md).
 
 ## License

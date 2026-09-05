@@ -112,6 +112,7 @@ export interface RuntimeSnapshot {
 		agentVersion: string | undefined;
 		mcpHttp: boolean;
 		restored: boolean;
+		ignoredStdoutNoiseLines: number;
 		stderrTail?: string;
 	}>;
 }
@@ -252,6 +253,7 @@ export class AntigravityRuntime {
 					agentVersion: binding.initialize.agentInfo?.version,
 					mcpHttp: binding.initialize.agentCapabilities?.mcpCapabilities?.http === true,
 					restored: binding.restored,
+					ignoredStdoutNoiseLines: binding.connection.process.ignoredStdoutNoiseLines,
 					...(includeStderr ? { stderrTail: binding.connection.process.stderrTail } : {}),
 				};
 			}),

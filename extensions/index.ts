@@ -163,7 +163,7 @@ export default function antigravityAcpExtension(pi: ExtensionAPI): void {
 					`Active bindings: ${snapshot.bindings}`,
 					formatMetrics(snapshot.metrics),
 					...snapshot.processes.flatMap((item) => [
-						`• pid=${item.pid ?? "?"} generation=${item.generation} model=${item.modelId} alive=${item.alive} restored=${item.restored} agent=${item.agentVersion ?? "?"} mcpHttp=${item.mcpHttp} permission=${item.waitingForPermission} tools=${item.waitingForTools}`,
+						`• pid=${item.pid ?? "?"} generation=${item.generation} model=${item.modelId} alive=${item.alive} restored=${item.restored} agent=${item.agentVersion ?? "?"} mcpHttp=${item.mcpHttp} permission=${item.waitingForPermission} tools=${item.waitingForTools} ignoredStdoutNoise=${item.ignoredStdoutNoiseLines}`,
 						...(verbose && item.stderrTail ? [`  stderr (redacted): ${item.stderrTail}`] : []),
 					]),
 				].join("\n"),

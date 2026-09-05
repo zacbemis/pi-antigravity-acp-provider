@@ -41,6 +41,7 @@ export class AntigravityProcess {
 	readonly output: WritableStream<Uint8Array>;
 	readonly exited: Promise<ProcessExit>;
 	private stderr = "";
+	private ignoredStdoutNoise = 0;
 	private settled = false;
 	private closing?: Promise<void>;
 
@@ -92,6 +93,14 @@ export class AntigravityProcess {
 
 	get stderrTail(): string {
 		return this.stderr;
+	}
+
+	get ignoredStdoutNoiseLines(): number {
+		return this.ignoredStdoutNoise;
+	}
+
+	recordCompatibilityNoise(): void {
+		this.ignoredStdoutNoise += 1;
 	}
 
 	get alive(): boolean {

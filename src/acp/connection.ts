@@ -37,6 +37,7 @@ export class AntigravityAcpConnection {
 	readonly initialized: Promise<InitializeResponse>;
 	private readonly connection: ClientSideConnection;
 	private readonly operationTimeoutMs: number;
+	private readonly protocolFailure: Promise<never>;
 	private handlers: AntigravityConnectionHandlers;
 	private closePromise?: Promise<void>;
 
@@ -44,9 +45,21 @@ export class AntigravityAcpConnection {
 		this.handlers = options.handlers ?? {};
 		this.operationTimeoutMs = options.operationTimeoutMs ?? 30_000;
 		this.process = new AntigravityProcess(options);
+		let rejectProtocolFailure!: (error: Error) => void;
+		this.protocolFailure = new Promise<never>((_resolve, reject) => {
+			rejectProtocolFailure = reject;
+		});
+		// Keep the rejection observed even if output fails while no request is
+		// active. Individual operations still race against the original promise.
+		void this.protocolFailure.catch(() => undefined);
 		const stream = boundedNdjsonStream(this.process.output, this.process.input, {
 			...(options.maxFrameBytes === undefined ? {} : { maxFrameBytes: options.maxFrameBytes }),
-			onProtocolError: () => void this.process.close(),
+			onCompatibilityNoise: () => this.process.recordCompatibilityNoise(),
+			onProtocolError: (error) => {
+				rejectProtocolFailure(error);
+				void this.process.close();
+			},
+			closeOnProtocolError: true,
 		});
 		this.connection = new ClientSideConnection(
 			() => ({
@@ -248,6 +261,7 @@ export class AntigravityAcpConnection {
 				promise.catch((error: unknown) => {
 					throw classifyError(error);
 				}),
+				this.protocolFailure,
 				new Promise<never>((_resolve, reject) => {
 					timer = setTimeout(() => {
 						void this.close();

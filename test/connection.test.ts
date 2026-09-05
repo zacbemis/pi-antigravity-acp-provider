@@ -7,6 +7,37 @@ import { AntigravityAcpConnection } from "../src/acp/connection.js";
 const fakeAgent = fileURLToPath(new URL("./fixtures/fake-agent.mjs", import.meta.url));
 
 describe("AntigravityAcpConnection", () => {
+	it("ignores known browser-launch stdout noise", async () => {
+		const connection = new AntigravityAcpConnection({
+			cwd: path.dirname(fakeAgent),
+			command: process.execPath,
+			args: [fakeAgent, "browser-noise"],
+		});
+		try {
+			await expect(connection.initialize()).resolves.toMatchObject({
+				agentInfo: { name: "fake-gemini" },
+			});
+			expect(connection.process.ignoredStdoutNoiseLines).toBe(1);
+		} finally {
+			await connection.close();
+		}
+	});
+
+	it("rejects malformed output without an unhandled SDK receive rejection", async () => {
+		const connection = new AntigravityAcpConnection({
+			cwd: path.dirname(fakeAgent),
+			command: process.execPath,
+			args: [fakeAgent, "malformed-output"],
+			initializeTimeoutMs: 5_000,
+		});
+		try {
+			await expect(connection.initialize()).rejects.toThrow("malformed JSON");
+		} finally {
+			await connection.close();
+		}
+		expect(connection.process.alive).toBe(false);
+	});
+
 	it("uses the official SDK against a real child process", async () => {
 		const updates: string[] = [];
 		const connection = new AntigravityAcpConnection({
