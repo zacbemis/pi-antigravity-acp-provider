@@ -20,6 +20,7 @@ The provider now targets Google's Antigravity product surface instead:
 - Resolves `AGY_ACP_BIN`, user and managed install paths, and `PATH`.
 - Uses the bridge's reviewed ACP registry installer when no server is present.
 - Renamed Pi login/provider presentation to **Google Antigravity (ACP)**.
+- Adds an SSH/headless OAuth relay because ACP 1.1.1 keeps its browser URL internal: a private `BROWSER` shim captures the URL, Pi displays it, and a user-pasted loopback callback is strictly validated and forwarded to the remote listener.
 - Reads only Antigravity auth presence, never token values.
 - Replaced stale Gemini 2.5 fallbacks with current Antigravity models. Effort-qualified ACP IDs are collapsed into one Pi model and selected dynamically through Pi's reasoning level.
 - Updated real and authenticated tests to assert `agentInfo.name === "antigravity-acp"`.

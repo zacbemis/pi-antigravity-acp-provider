@@ -40,6 +40,64 @@ describe("AntigravityRuntime", () => {
 		}
 	});
 
+	it("relays Google login through Pi on a headless host", async () => {
+		const previousMode = process.env.PI_ANTIGRAVITY_ACP_OAUTH_MODE;
+		process.env.PI_ANTIGRAVITY_ACP_OAUTH_MODE = "manual";
+		const runtime = new AntigravityRuntime(
+			(options) =>
+				new AntigravityAcpConnection({
+					...options,
+					command: process.execPath,
+					args: [fakeAgent, "headless-auth"],
+				}),
+		);
+		let shownUrl: string | undefined;
+		try {
+			await runtime.loginGoogle(undefined, undefined, {
+				showAuthorizationUrl(url) {
+					shownUrl = url;
+				},
+				promptForCallback: async () => {
+					if (!shownUrl) throw new Error("authorization URL was not shown");
+					const authorization = new URL(shownUrl);
+					const redirect = authorization.searchParams.get("redirect_uri");
+					const state = authorization.searchParams.get("state");
+					if (!redirect || !state) throw new Error("authorization URL is incomplete");
+					return `${redirect}?state=${encodeURIComponent(state)}&code=fake-code`;
+				},
+			});
+			expect(shownUrl).toMatch(/^https:\/\/accounts\.google\.com\//u);
+		} finally {
+			await runtime.close();
+			if (previousMode === undefined) delete process.env.PI_ANTIGRAVITY_ACP_OAUTH_MODE;
+			else process.env.PI_ANTIGRAVITY_ACP_OAUTH_MODE = previousMode;
+		}
+	});
+
+	it("does not prompt when headless login reuses cached authentication", async () => {
+		const previousMode = process.env.PI_ANTIGRAVITY_ACP_OAUTH_MODE;
+		process.env.PI_ANTIGRAVITY_ACP_OAUTH_MODE = "manual";
+		const runtime = new AntigravityRuntime(
+			(options) => new AntigravityAcpConnection({ ...options, command: process.execPath, args: [fakeAgent] }),
+		);
+		const progress: string[] = [];
+		try {
+			await runtime.loginGoogle(undefined, (message) => progress.push(message), {
+				showAuthorizationUrl() {
+					throw new Error("cached authentication unexpectedly showed a URL");
+				},
+				promptForCallback: async () => {
+					throw new Error("cached authentication unexpectedly prompted");
+				},
+			});
+			expect(progress).toContain("Antigravity reused the saved Google login.");
+		} finally {
+			await runtime.close();
+			if (previousMode === undefined) delete process.env.PI_ANTIGRAVITY_ACP_OAUTH_MODE;
+			else process.env.PI_ANTIGRAVITY_ACP_OAUTH_MODE = previousMode;
+		}
+	});
+
 	it("maps a complete ACP turn into balanced Pi events", async () => {
 		const runtime = new AntigravityRuntime(
 			(options) => new AntigravityAcpConnection({ ...options, command: process.execPath, args: [fakeAgent] }),

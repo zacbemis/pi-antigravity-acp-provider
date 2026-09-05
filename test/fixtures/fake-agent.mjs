@@ -1,3 +1,5 @@
+import { spawn } from "node:child_process";
+import http from "node:http";
 import readline from "node:readline";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
@@ -66,6 +68,35 @@ for await (const line of rl) {
 			},
 		});
 	} else if (method === "authenticate") {
+		if (scenario === "headless-auth") {
+			const state = "fake-oauth-state";
+			const server = http.createServer((request, response) => {
+				const callback = new URL(request.url ?? "/", "http://127.0.0.1");
+				if (callback.searchParams.get("state") !== state || !callback.searchParams.get("code")) {
+					response.writeHead(400).end("Invalid callback");
+					return;
+				}
+				response.writeHead(200).end("Authenticated");
+				server.close();
+				send({ jsonrpc: "2.0", id, result: {} });
+			});
+			server.listen(0, "127.0.0.1", () => {
+				const address = server.address();
+				if (!address || typeof address === "string") throw new Error("missing fake OAuth address");
+				const redirect = `http://127.0.0.1:${address.port}/`;
+				const authorization = new URL("https://accounts.google.com/o/oauth2/v2/auth");
+				authorization.searchParams.set("redirect_uri", redirect);
+				authorization.searchParams.set("state", state);
+				const browser = process.env.BROWSER;
+				if (!browser) throw new Error("missing BROWSER capture command");
+				const child = spawn(browser, [authorization.toString()], { env: process.env, stdio: "ignore" });
+				child.once("error", (error) => {
+					server.close();
+					send({ jsonrpc: "2.0", id, error: { code: -32603, message: error.message } });
+				});
+			});
+			continue;
+		}
 		send({ jsonrpc: "2.0", id, result: {} });
 	} else if (method === "session/new") {
 		if (scenario === "internal-error") {

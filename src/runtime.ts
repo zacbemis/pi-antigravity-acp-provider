@@ -27,6 +27,7 @@ import {
 export { MANAGED_AUTH_MARKER, PERMISSION_RESULT_KIND, PERMISSION_TOOL_NAME } from "./constants.js";
 import { mapSessionUpdate } from "./acp/events.js";
 import { ensureAntigravityAcpReady } from "./acp/setup.js";
+import { HeadlessOAuthRelay, shouldUseHeadlessOAuth } from "./acp/headless-oauth.js";
 import {
 	PiMcpBridge,
 	piToolFingerprint,
@@ -87,6 +88,11 @@ export interface PermissionView {
 	id: string;
 	title: string;
 	options: Array<{ id: string; label: string; kind: string }>;
+}
+
+export interface ManualGoogleLoginInteraction {
+	showAuthorizationUrl: (url: string, instructions: string) => void;
+	promptForCallback: (signal: AbortSignal) => Promise<string>;
 }
 
 export interface PermissionToolResult {
@@ -166,10 +172,16 @@ export class AntigravityRuntime {
 	async loginGoogle(
 		signal?: AbortSignal,
 		onProgress?: (message: string) => void,
+		manualInteraction?: ManualGoogleLoginInteraction,
 	): Promise<void> {
 		this.assertActive();
 		if (this.ensureAgent) await ensureAntigravityAcpReady(onProgress);
-		const connection = this.connectionFactory({ cwd: process.cwd() });
+		const useManualOAuth = manualInteraction !== undefined && shouldUseHeadlessOAuth();
+		const relay = useManualOAuth ? new HeadlessOAuthRelay() : undefined;
+		const connection = this.connectionFactory({
+			cwd: process.cwd(),
+			...(relay ? { env: relay.env } : {}),
+		});
 		try {
 			const initialize = await connection.initialize();
 			const method = initialize.authMethods?.find((candidate) =>
@@ -178,9 +190,42 @@ export class AntigravityRuntime {
 				),
 			);
 			if (!method) throw new AntigravityAcpError("auth", "Antigravity ACP did not advertise Google login");
-			await connection.authenticate({ methodId: method.id }, signal);
+			const authentication = connection.authenticate(
+				{ methodId: method.id },
+				signal,
+				relay ? 10 * 60_000 : undefined,
+			);
+			void authentication.catch(() => undefined);
+			if (relay && manualInteraction) {
+				const captured = await raceAuthentication(relay.waitForAuthorization(signal), authentication);
+				if (captured.authenticated) {
+					onProgress?.("Antigravity reused the saved Google login.");
+				} else {
+					const instructions =
+						"Open this URL in a browser on your local machine. After Google redirects to localhost, the page may fail to load; copy the complete localhost URL from the browser address bar and paste it below.";
+					manualInteraction.showAuthorizationUrl(captured.value.url, instructions);
+					const promptController = new AbortController();
+					let entered: Awaited<ReturnType<typeof raceAuthentication<string>>>;
+					try {
+						entered = await raceAuthentication(
+							manualInteraction.promptForCallback(promptController.signal),
+							authentication,
+						);
+					} catch (error) {
+						promptController.abort();
+						throw error;
+					}
+					if (entered.authenticated) {
+						promptController.abort();
+					} else {
+						await relay.forwardCallback(entered.value, captured.value, signal);
+					}
+				}
+			}
+			await authentication;
 			await connection.newSession(process.cwd(), signal);
 		} finally {
+			relay?.dispose();
 			await connection.close();
 		}
 	}
@@ -863,6 +908,16 @@ function cancelPiTools(binding: Binding, reason: string): void {
 		pending.resolve({ content: [{ type: "text", text: reason }], isError: true });
 	}
 	binding.pendingTools.clear();
+}
+
+async function raceAuthentication<T>(
+	step: Promise<T>,
+	authentication: Promise<void>,
+): Promise<{ authenticated: true } | { authenticated: false; value: T }> {
+	return Promise.race([
+		step.then((value) => ({ authenticated: false as const, value })),
+		authentication.then(() => ({ authenticated: true as const })),
+	]);
 }
 
 function isAbort(error: unknown): boolean {
