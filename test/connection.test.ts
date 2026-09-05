@@ -38,6 +38,26 @@ describe("AntigravityAcpConnection", () => {
 		expect(connection.process.alive).toBe(false);
 	});
 
+	it("includes safe structured details in ACP errors", async () => {
+		const connection = new AntigravityAcpConnection({
+			cwd: path.dirname(fakeAgent),
+			command: process.execPath,
+			args: [fakeAgent, "internal-error"],
+		});
+		try {
+			await connection.initialize();
+			const error = await connection.newSession(process.cwd()).catch((cause: unknown) => cause);
+			expect(error).toBeInstanceOf(Error);
+			expect((error as Error).message).toContain(
+				"Internal error: Permission denied: localharness_external",
+			);
+			expect((error as Error).message).toContain("api_key=<redacted>");
+			expect((error as Error).message).not.toContain("AIza1234567890abcdefghijkl");
+		} finally {
+			await connection.close();
+		}
+	});
+
 	it("uses the official SDK against a real child process", async () => {
 		const updates: string[] = [];
 		const connection = new AntigravityAcpConnection({

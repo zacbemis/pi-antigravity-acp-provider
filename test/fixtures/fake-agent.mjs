@@ -68,6 +68,18 @@ for await (const line of rl) {
 	} else if (method === "authenticate") {
 		send({ jsonrpc: "2.0", id, result: {} });
 	} else if (method === "session/new") {
+		if (scenario === "internal-error") {
+			send({
+				jsonrpc: "2.0",
+				id,
+				error: {
+					code: -32603,
+					message: "Internal error",
+					data: { details: "Permission denied: localharness_external; api_key=AIza1234567890abcdefghijkl" },
+				},
+			});
+			continue;
+		}
 		mcpServer = params.mcpServers?.find((server) => server.type === "http");
 		send({
 			jsonrpc: "2.0",

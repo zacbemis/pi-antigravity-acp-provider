@@ -1,4 +1,4 @@
-export const PACKAGE_VERSION = "0.1.3";
+export const PACKAGE_VERSION = "0.1.4";
 export const ANTIGRAVITY_ACP_VERSION = "1.1.1";
 export const ACP_SDK_VERSION = "0.16.1";
 export const ACP_PROTOCOL_VERSION = 1;

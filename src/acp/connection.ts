@@ -17,7 +17,7 @@ import {
 
 import { PACKAGE_VERSION } from "../constants.js";
 import { boundedNdjsonStream } from "./bounded-stream.js";
-import { abortError, AntigravityAcpError } from "./errors.js";
+import { abortError, AntigravityAcpError, redact } from "./errors.js";
 import { AntigravityProcess, type AntigravityProcessOptions } from "./process.js";
 
 export interface AntigravityConnectionHandlers {
@@ -285,17 +285,25 @@ function classifyError(error: unknown): Error {
 				  typeof error === "object" &&
 				  typeof (error as { code?: unknown }).code === "number" &&
 				  typeof (error as { message?: unknown }).message === "string"
-				? (error as { code: number; message: string })
+				? (error as { code: number; message: string; data?: unknown })
 				: undefined;
 	if (structured) {
+		const detail = structuredErrorDetail(structured.data);
+		const message = detail ? `${structured.message}: ${detail}` : structured.message;
 		if (structured.code === -32000) {
-			return new AntigravityAcpError("auth", `Antigravity authentication required: ${structured.message}`, {
+			return new AntigravityAcpError("auth", `Antigravity authentication required: ${message}`, {
 				cause: error,
 			});
 		}
-		return new AntigravityAcpError("protocol", `Antigravity ACP error ${structured.code}: ${structured.message}`, {
+		return new AntigravityAcpError("protocol", `Antigravity ACP error ${structured.code}: ${message}`, {
 			cause: error,
 		});
 	}
 	return error instanceof Error ? error : new Error(String(error));
+}
+
+function structuredErrorDetail(data: unknown): string | undefined {
+	if (!data || typeof data !== "object") return undefined;
+	const detail = (data as { details?: unknown }).details;
+	return typeof detail === "string" && detail.trim() ? redact(detail.trim()) : undefined;
 }
