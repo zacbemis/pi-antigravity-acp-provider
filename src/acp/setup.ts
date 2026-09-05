@@ -20,6 +20,7 @@ const execFileAsync = promisify(execFile);
 const REGISTRY_URL =
 	"https://raw.githubusercontent.com/agentclientprotocol/registry/main/antigravity-acp/agent.json";
 const INSTALL_TIMEOUT_MS = 30 * 60_000;
+const POSIX_RUNTIME_EXECUTABLES = ["agy_acp_server.par", "localharness_external"] as const;
 let inFlight: Promise<void> | undefined;
 
 interface RegistryEntry {
@@ -69,7 +70,8 @@ export async function updateAntigravityAcpRuntime(
 async function ensureOnce(onProgress?: (message: string) => void): Promise<void> {
 	configureDefaultAuth();
 	try {
-		resolveAntigravityAcpLaunch();
+		const launch = resolveAntigravityAcpLaunch();
+		if (launch.source === "managed") repairRuntimeExecutablePermissions(path.dirname(launch.command));
 		return;
 	} catch {
 		// Install the reviewed registry artifact below.
@@ -113,6 +115,7 @@ async function installPinnedRuntime(
 				const stagedBinary = path.join(staging, commandName);
 				if (!fs.existsSync(stagedBinary)) throw new Error(`${commandName} is missing from the registry archive`);
 				fs.chmodSync(stagedBinary, 0o755);
+				repairRuntimeExecutablePermissions(staging);
 				await verifyPinnedBinary(key, stagedBinary);
 				fs.writeFileSync(
 					path.join(staging, "install-integrity.json"),
@@ -129,6 +132,7 @@ async function installPinnedRuntime(
 				throw error;
 			}
 		}
+		repairRuntimeExecutablePermissions(destination);
 		pointCurrentAt(root, destination);
 		process.env.AGY_ACP_BIN = binary;
 		resolveAntigravityAcpLaunch();
@@ -183,6 +187,34 @@ async function download(
 	});
 	await pipeline(response.body.pipeThrough(progress), fs.createWriteStream(destination, { mode: 0o600 }));
 	return hash.digest("hex");
+}
+
+export function repairRuntimeExecutablePermissions(
+	directory: string,
+	platform: NodeJS.Platform = process.platform,
+): string[] {
+	if (platform === "win32") return [];
+	const repaired: string[] = [];
+	for (const name of POSIX_RUNTIME_EXECUTABLES) {
+		const file = path.join(directory, name);
+		let stat: fs.Stats;
+		try {
+			stat = fs.lstatSync(file);
+		} catch (error) {
+			if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+				throw new Error(`Managed ACP runtime payload is missing: ${name}`);
+			}
+			throw error;
+		}
+		if (!stat.isFile()) throw new Error(`Managed ACP runtime payload is not a regular file: ${name}`);
+		const permissions = stat.mode & 0o777;
+		const executablePermissions = permissions | ((permissions & 0o444) >> 2);
+		if (permissions !== executablePermissions) {
+			fs.chmodSync(file, executablePermissions);
+			repaired.push(name);
+		}
+	}
+	return repaired;
 }
 
 function pointCurrentAt(root: string, destination: string): void {
