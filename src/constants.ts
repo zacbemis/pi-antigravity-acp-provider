@@ -1,6 +1,6 @@
-export const PACKAGE_VERSION = "0.1.5";
+export const PACKAGE_VERSION = "0.1.6";
 export const ANTIGRAVITY_ACP_VERSION = "1.1.1";
-export const ACP_SDK_VERSION = "0.16.1";
+export const ACP_SDK_VERSION = "0.19.1";
 export const ACP_PROTOCOL_VERSION = 1;
 export const MANAGED_AUTH_MARKER = "pi-antigravity-acp:managed-by-antigravity";
 export const PERMISSION_TOOL_NAME = "antigravity_acp_permission";

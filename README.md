@@ -103,7 +103,7 @@ This launches a full coding agent with the user's OS privileges. **The default `
 
 ## Compatibility
 
-The implementation is pinned to Pi 0.85.0, ACP SDK 0.16.1, Antigravity ACP 1.1.1, and ACP protocol 1. The official registry currently provides Linux x64/ARM64, Windows x64/ARM64, and macOS ARM64 artifacts. Intel macOS has no pinned artifact, and Alpine/musl is rejected because Google's Linux build targets glibc.
+The implementation is pinned to Pi 0.85.0, ACP SDK 0.19.1, Antigravity ACP 1.1.1, and ACP protocol 1. ACP session setup allows up to two minutes for slow first-run initialization, while transport shutdown rejects pending requests immediately. The official registry currently provides Linux x64/ARM64, Windows x64/ARM64, and macOS ARM64 artifacts. Intel macOS has no pinned artifact, and Alpine/musl is rejected because Google's Linux build targets glibc.
 
 During browser authentication, Chromium may write `Opening in existing browser session.` to the ACP process's inherited stdout. The transport ignores only that exact known compatibility line and reports its count in `doctor`; all other non-JSON stdout remains a fatal protocol error.
 

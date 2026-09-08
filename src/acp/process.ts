@@ -116,11 +116,10 @@ export class AntigravityProcess {
 
 	private async closeOnce(): Promise<void> {
 		if (!this.alive) return;
-		try {
-			this.child.stdin.end();
-		} catch {
-			// The child may already have closed its input.
-		}
+		// Do not end stdin independently of the Web WritableStream adapter. An
+		// in-flight SDK write may otherwise reach Node after stdin.end() and raise
+		// ERR_STREAM_WRITE_AFTER_END as an uncaught stream error. Terminating the
+		// owned process tree closes all three stdio streams together.
 		this.signal("SIGTERM");
 		const exited = await Promise.race([
 			this.exited.then(() => true),

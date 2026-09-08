@@ -20,6 +20,8 @@ import { boundedNdjsonStream } from "./bounded-stream.js";
 import { abortError, AntigravityAcpError, redact } from "./errors.js";
 import { AntigravityProcess, type AntigravityProcessOptions } from "./process.js";
 
+const DEFAULT_OPERATION_TIMEOUT_MS = 120_000;
+
 export interface AntigravityConnectionHandlers {
 	onUpdate?: (notification: SessionNotification) => void | Promise<void>;
 	onPermission?: (request: RequestPermissionRequest) => Promise<RequestPermissionResponse>;
@@ -43,7 +45,7 @@ export class AntigravityAcpConnection {
 
 	constructor(options: AntigravityConnectionOptions) {
 		this.handlers = options.handlers ?? {};
-		this.operationTimeoutMs = options.operationTimeoutMs ?? 30_000;
+		this.operationTimeoutMs = options.operationTimeoutMs ?? DEFAULT_OPERATION_TIMEOUT_MS;
 		this.process = new AntigravityProcess(options);
 		let rejectProtocolFailure!: (error: Error) => void;
 		this.protocolFailure = new Promise<never>((_resolve, reject) => {

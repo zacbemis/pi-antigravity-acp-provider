@@ -1,6 +1,6 @@
 # Implementation status
 
-Status as of 2026-09-05 for package version 0.1.5.
+Status as of 2026-09-06 for package version 0.1.6.
 
 The bundled Gemini CLI implementation was superseded after its individual Code Assist authentication path was retired. See [ANTIGRAVITY-MIGRATION.md](ANTIGRAVITY-MIGRATION.md).
 
@@ -8,8 +8,8 @@ The bundled Gemini CLI implementation was superseded after its individual Code A
 
 - Pi provider registration and marketplace package metadata.
 - Google Antigravity ACP server resolution plus self-service installation based on `@estebanforge/pi-antigravity-bridge` 1.4.1.
-- Official ACP SDK 0.16.1 transport using stable protocol v1.
-- Strict bounded NDJSON framing, operation deadlines, cancellation, redacted errors, and bounded stderr. The exact Chromium `Opening in existing browser session.` compatibility line is filtered and counted without weakening rejection of other non-protocol stdout; genuine framing failures reject active operations without escaping through the SDK as uncaught exceptions.
+- Official ACP SDK 0.19.1 transport using stable protocol v1, including upstream fixes that close failed transports, reject pending requests, and observe internal rejection paths.
+- Strict bounded NDJSON framing, two-minute session-operation deadlines, cancellation, redacted errors, and bounded stderr. Process shutdown leaves stdin ownership with the Web Streams adapter to prevent `ERR_STREAM_WRITE_AFTER_END`. The exact Chromium `Opening in existing browser session.` compatibility line is filtered and counted without weakening rejection of other non-protocol stdout; genuine framing failures reject active operations without escaping through the SDK as uncaught exceptions.
 - Packaged parent-death supervisor with TERM/KILL escalation and POSIX process-group cleanup.
 - Antigravity Google/API-key `/login`, automatic SSH/headless OAuth URL capture and validated loopback-callback relay, structural local auth health, network validation through setup/qualification, local logout, and account-switch reset flow.
 - Antigravity fallback models, authenticated ACP model discovery, catalog refresh, and `session/set_model` switching.
@@ -36,4 +36,4 @@ On Linux with authenticated `agy_acp_server_1.1.1`, ACP protocol 1 initializatio
 - Confirm transcript prefix fingerprints and unseen external-delta replay against real Pi branch/fork/compaction behavior.
 - Complete public beta publishing and Pi marketplace installation verification.
 
-Version 0.1.5 remains a beta implementation.
+Version 0.1.6 remains a beta implementation.

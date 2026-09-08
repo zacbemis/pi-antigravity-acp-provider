@@ -67,6 +67,9 @@ for await (const line of rl) {
 				},
 			},
 		});
+		if (scenario === "exit-after-initialize") {
+			setTimeout(() => process.exit(0), 10);
+		}
 	} else if (method === "authenticate") {
 		if (scenario === "headless-auth") {
 			const state = "fake-oauth-state";
@@ -99,6 +102,7 @@ for await (const line of rl) {
 		}
 		send({ jsonrpc: "2.0", id, result: {} });
 	} else if (method === "session/new") {
+		if (scenario === "session-timeout") continue;
 		if (scenario === "internal-error") {
 			send({
 				jsonrpc: "2.0",

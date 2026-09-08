@@ -1,6 +1,6 @@
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { AntigravityAcpConnection } from "../src/acp/connection.js";
 
@@ -36,6 +36,54 @@ describe("AntigravityAcpConnection", () => {
 			await connection.close();
 		}
 		expect(connection.process.alive).toBe(false);
+	});
+
+	it("rejects promptly and quietly when the agent exits before a request", async () => {
+		const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
+		const connection = new AntigravityAcpConnection({
+			cwd: path.dirname(fakeAgent),
+			command: process.execPath,
+			args: [fakeAgent, "exit-after-initialize"],
+			operationTimeoutMs: 5_000,
+		});
+		try {
+			await connection.initialize();
+			await connection.process.exited;
+			const started = Date.now();
+			const error = await connection.newSession(process.cwd()).catch((cause: unknown) => cause);
+			expect(error).toBeInstanceOf(Error);
+			expect((error as Error).message).not.toContain("write after end");
+			expect(Date.now() - started).toBeLessThan(500);
+			expect(
+				errorSpy.mock.calls.some((call) => String(call[0]).includes("ACP write error")),
+			).toBe(false);
+		} finally {
+			errorSpy.mockRestore();
+			await connection.close();
+		}
+	});
+
+	it("reports a session timeout without leaking an unhandled rejection", async () => {
+		const unhandled: unknown[] = [];
+		const onUnhandled = (error: unknown) => unhandled.push(error);
+		process.on("unhandledRejection", onUnhandled);
+		const connection = new AntigravityAcpConnection({
+			cwd: path.dirname(fakeAgent),
+			command: process.execPath,
+			args: [fakeAgent, "session-timeout"],
+			operationTimeoutMs: 25,
+		});
+		try {
+			await connection.initialize();
+			await expect(connection.newSession(process.cwd())).rejects.toThrow(
+				"Antigravity ACP session/new timed out after 25ms",
+			);
+			await new Promise((resolve) => setTimeout(resolve, 25));
+			expect(unhandled).toEqual([]);
+		} finally {
+			process.off("unhandledRejection", onUnhandled);
+			await connection.close();
+		}
 	});
 
 	it("includes safe structured details in ACP errors", async () => {

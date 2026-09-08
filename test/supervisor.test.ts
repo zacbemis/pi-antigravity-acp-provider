@@ -34,7 +34,10 @@ describe.skipIf(process.platform === "win32")("parent-death supervisor", () => {
 		});
 		await new Promise<void>((resolve) => child.child.stdout.once("data", () => resolve()));
 		const started = Date.now();
-		await child.close();
+		const closing = child.close();
+		await delay(25);
+		expect(child.child.stdin.writableEnded).toBe(false);
+		await closing;
 		expect(Date.now() - started).toBeGreaterThanOrEqual(1_400);
 		expect(child.alive).toBe(false);
 	});
