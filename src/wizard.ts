@@ -21,7 +21,7 @@ export async function runSetupWizard(
 		);
 		if (!loginNow) {
 			ui.notify(
-				`Runtime ready at ${setup.launch?.command ?? "unknown path"}. Run /login and choose Google Antigravity (ACP) when ready.`,
+				`Runtime ${setup.installedVersion ?? setup.approvedVersion} ready at ${setup.launch?.command ?? "unknown path"}. Run /login and choose Google Antigravity (ACP) when ready.`,
 				"warning",
 			);
 			return;
@@ -73,7 +73,7 @@ export async function runSetupWizard(
 	ui.notify(
 		[
 			"Antigravity ACP setup complete.",
-			`Runtime: ${setup.pinnedVersion} (${setup.platform})`,
+			`Runtime: ${setup.installedVersion ?? setup.approvedVersion} (${setup.platform})`,
 			`Authentication: valid ${localAuth.authType ?? localAuth.status}`,
 			`Models discovered: ${models.length}`,
 			`Permission mode: ${runtimeStatus.permissionMode.replace("_", "-")}.`,

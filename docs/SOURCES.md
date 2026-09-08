@@ -14,6 +14,7 @@ Research performed **2026-09-04**. Source links are primary where possible. Loca
 | Requested reference | `@estebanforge/pi-antigravity-bridge` 1.4.0 |
 | Existing Gemini Pi package | `pi-gemini-acp` 0.13.2, source commit [`fe099004`](https://github.com/brandonkramer/pi-gemini-acp/commit/fe099004a13233a232d1abe2b41530a78101e861) |
 | General ACP Pi package | `pi-acp-agents`, commit [`6b970f90`](https://github.com/buihongduc132/pi-acp-agents/commit/6b970f90856a73319d0cce10b318639a156733b5) |
+| T3 Code Antigravity installer | [`AntigravityInstallation.ts`](https://github.com/pingdotgg/t3code/blob/main/apps/server/src/provider/AntigravityInstallation.ts) and [`antigravityRelease.ts`](https://github.com/pingdotgg/t3code/blob/main/apps/server/src/provider/antigravityRelease.ts), inspected 2026-09-06 |
 
 Because the Gemini source checkout was ahead of npm stable, all behavior used for implementation must be reconfirmed against the exact npm artifact chosen in Milestone 0. Source-main observations explain direction but are not automatically claims about 0.58.0.
 

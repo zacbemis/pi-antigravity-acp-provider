@@ -1,6 +1,6 @@
 {
   "name": "pi-antigravity-acp-provider",
-  "version": "0.1.6",
+  "version": "0.1.7",
   "description": "First-class Google Antigravity ACP provider for Pi",
   "type": "module",
   "license": "MIT",
@@ -31,6 +31,7 @@
     "extensions",
     "src",
     "docs",
+    "runtime-manifest.json",
     "README.md",
     "LICENSE"
   ],
@@ -53,6 +54,8 @@
     "check": "npm run typecheck && npm test",
     "pack:check": "npm pack --dry-run",
     "test:packed": "node scripts/packed-install-smoke.mjs",
+    "refresh:runtime-manifest": "node scripts/refresh-runtime-manifest.mjs",
+    "sign:runtime-manifest": "node scripts/sign-runtime-manifest.mjs",
     "prepublishOnly": "npm run check"
   },
   "peerDependencies": {

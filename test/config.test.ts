@@ -3,7 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { loadConfig, savePermissionMode } from "../src/config.js";
+import { loadConfig, savePermissionMode, saveRuntimeUpdateMode } from "../src/config.js";
 
 const directories: string[] = [];
 afterEach(() => {
@@ -15,8 +15,9 @@ describe("permission configuration", () => {
 		const directory = fs.mkdtempSync(path.join(os.tmpdir(), "antigravity-acp-config-"));
 		directories.push(directory);
 		const file = path.join(directory, "nested", "config.json");
-		expect(loadConfig(file).permissions).toBe("yolo");
+		expect(loadConfig(file)).toEqual({ permissions: "yolo", runtimeUpdates: "automatic" });
+		saveRuntimeUpdateMode("notify", file);
 		savePermissionMode("auto_edit", file);
-		expect(loadConfig(file).permissions).toBe("auto_edit");
+		expect(loadConfig(file)).toEqual({ permissions: "auto_edit", runtimeUpdates: "notify" });
 	});
 });

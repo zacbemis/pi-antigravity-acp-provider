@@ -3,9 +3,11 @@ import os from "node:os";
 import path from "node:path";
 
 export type PermissionMode = "default" | "auto_edit" | "yolo";
+export type RuntimeUpdateMode = "automatic" | "notify" | "manual";
 
 export interface AntigravityAcpConfig {
 	permissions: PermissionMode;
+	runtimeUpdates: RuntimeUpdateMode;
 }
 
 const CONFIG_ROOT = path.join(os.homedir(), ".pi", "agent", "antigravity-acp-provider");
@@ -21,21 +23,33 @@ export const LEGACY_CONFIG_PATH = path.join(
 export function loadConfig(file = CONFIG_PATH): AntigravityAcpConfig {
 	if (file === CONFIG_PATH) migrateLegacyConfig();
 	try {
-		const parsed = JSON.parse(fs.readFileSync(file, "utf8")) as { permissions?: unknown };
-		if (isPermissionMode(parsed.permissions)) return { permissions: parsed.permissions };
+		const parsed = JSON.parse(fs.readFileSync(file, "utf8")) as {
+			permissions?: unknown;
+			runtimeUpdates?: unknown;
+		};
+		return {
+			permissions: isPermissionMode(parsed.permissions) ? parsed.permissions : "yolo",
+			runtimeUpdates: isRuntimeUpdateMode(parsed.runtimeUpdates) ? parsed.runtimeUpdates : "automatic",
+		};
 	} catch {
-		// Missing or malformed configuration uses the documented default.
+		// Missing or malformed configuration uses the documented defaults.
 	}
-	return { permissions: "yolo" };
+	return { permissions: "yolo", runtimeUpdates: "automatic" };
 }
 
 export function savePermissionMode(mode: PermissionMode, file = CONFIG_PATH): void {
+	writeConfig({ ...loadConfig(file), permissions: mode }, file);
+}
+
+export function saveRuntimeUpdateMode(mode: RuntimeUpdateMode, file = CONFIG_PATH): void {
+	writeConfig({ ...loadConfig(file), runtimeUpdates: mode }, file);
+}
+
+function writeConfig(config: AntigravityAcpConfig, file: string): void {
 	const directory = path.dirname(file);
 	fs.mkdirSync(directory, { recursive: true, mode: 0o700 });
 	const temporary = `${file}.${process.pid}.tmp`;
-	fs.writeFileSync(temporary, `${JSON.stringify({ permissions: mode }, null, 2)}\n`, {
-		mode: 0o600,
-	});
+	fs.writeFileSync(temporary, `${JSON.stringify(config, null, 2)}\n`, { mode: 0o600 });
 	fs.renameSync(temporary, file);
 }
 
@@ -52,6 +66,10 @@ function migrateLegacyConfig(): void {
 
 export function isPermissionMode(value: unknown): value is PermissionMode {
 	return value === "default" || value === "auto_edit" || value === "yolo";
+}
+
+export function isRuntimeUpdateMode(value: unknown): value is RuntimeUpdateMode {
+	return value === "automatic" || value === "notify" || value === "manual";
 }
 
 export function permissionModeLabel(mode: PermissionMode): string {

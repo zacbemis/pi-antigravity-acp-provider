@@ -17,14 +17,16 @@ export function resolveAntigravityAcpLaunch(): AntigravityLaunch {
 		if (executable(command)) return directOrWrapper(command, "env");
 	}
 
-	const userBin = path.join(os.homedir(), ".local", "bin", "agy_acp_server.par");
-	if (executable(userBin)) return { command: userBin, args: [], source: "user-bin" };
-
+	// Prefer the provider's verified active release over ambient executables.
+	// AGY_ACP_BIN remains the explicit opt-out for user-managed installations.
 	const managedRoot = path.join(os.homedir(), ".local", "opt", "agy-acp", "current");
 	for (const name of ["agy_acp_server.par", "agy_acp_server.exe"]) {
 		const managed = path.join(managedRoot, name);
 		if (executable(managed)) return directOrWrapper(managed, "managed");
 	}
+
+	const userBin = path.join(os.homedir(), ".local", "bin", "agy_acp_server.par");
+	if (executable(userBin)) return { command: userBin, args: [], source: "user-bin" };
 
 	for (const directory of (process.env.PATH ?? "").split(path.delimiter)) {
 		if (!directory) continue;

@@ -1,6 +1,6 @@
 # Implementation status
 
-Status as of 2026-09-06 for package version 0.1.6.
+Status as of 2026-09-06 for package version 0.1.7.
 
 The bundled Gemini CLI implementation was superseded after its individual Code Assist authentication path was retired. See [ANTIGRAVITY-MIGRATION.md](ANTIGRAVITY-MIGRATION.md).
 
@@ -19,7 +19,7 @@ The bundled Gemini CLI implementation was superseded after its individual Code A
 - Persistent ACP bindings keyed by Pi session ID, serialized turns, on-disk restoration through `session/resume`/`session/load`, reconstruction fallback, rewind detection, and cleanup.
 - Persisted Antigravity permission modes (`default`, `auto_edit`, and `yolo`), with `yolo` as the requested default. Prompting modes retain single-use, fail-closed ACP permission continuation through a real Pi tool round trip.
 - Authenticated loopback MCP exposure of active Pi tools with `pi_` namespacing, schema sanitization, original-schema revalidation, bounded catalogs/bodies, and genuine Pi tool-result continuation.
-- Setup wizard, pinned-runtime update command, exact Google artifact URL enforcement, pinned archive hashes for every supported platform, verified Linux x64 binary hash, managed server/helper executable-permission repair, musl detection, macOS quarantine cleanup, and Windows `taskkill /T` process-tree cleanup.
+- Setup wizard and automatic/notify/manual runtime updates backed by a remotely refreshable Ed25519-signed catalog. Installation enforces exact Google URLs, archive hashes and decoded sizes, exact executable/helper names and sizes, strict two-file extraction, pre-activation ACP identity/version checks, immutable hash-addressed releases, a cross-process update lock, rollback retention, managed server/helper executable-permission repair, musl detection, macOS quarantine cleanup, and Windows `taskkill /T` process-tree cleanup.
 - Unit, fake-subprocess, cancellation, supervisor, packed-install, real-server initialize, live authenticated prompt, and live cancellation/session-restore/MCP/permission/model qualification tests.
 - Primary package/provider/command branding renamed to `pi-antigravity-acp-provider` / `antigravity-acp`; `/gemini-acp` remains a deprecated command alias.
 
@@ -36,4 +36,4 @@ On Linux with authenticated `agy_acp_server_1.1.1`, ACP protocol 1 initializatio
 - Confirm transcript prefix fingerprints and unseen external-delta replay against real Pi branch/fork/compaction behavior.
 - Complete public beta publishing and Pi marketplace installation verification.
 
-Version 0.1.6 remains a beta implementation.
+Version 0.1.7 remains a beta implementation.

@@ -1,15 +1,92 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { repairRuntimeExecutablePermissions } from "../src/acp/setup.js";
+import { readBundledRuntimeManifest, latestManifestRelease } from "../src/acp/runtime-manifest.js";
+import {
+	adoptLegacyCurrentRelease,
+	repairRuntimeExecutablePermissions,
+	validateRuntimeArchiveEntries,
+	updateAntigravityAcpRuntime,
+} from "../src/acp/setup.js";
 
 const directories: string[] = [];
 afterEach(() => {
+	vi.unstubAllEnvs();
+	vi.unstubAllGlobals();
 	for (const directory of directories.splice(0)) {
 		fs.rmSync(directory, { recursive: true, force: true });
 	}
+});
+
+describe("external runtime ownership", () => {
+	it("refuses explicit updates before any network request", async () => {
+		const binary = path.join(temporaryDirectory(), "external-agent");
+		fs.writeFileSync(binary, "external", { mode: 0o755 });
+		vi.stubEnv("AGY_ACP_BIN", binary);
+		const fetchMock = vi.fn();
+		vi.stubGlobal("fetch", fetchMock);
+		await expect(updateAntigravityAcpRuntime()).rejects.toThrow("externally managed");
+		expect(fetchMock).not.toHaveBeenCalled();
+		expect(fs.readFileSync(binary, "utf8")).toBe("external");
+	});
+});
+
+describe("managed runtime archive validation", () => {
+	const asset = latestManifestRelease(readBundledRuntimeManifest()).platforms["linux-x86_64"]!;
+	const entries = [
+		{ type: "File" as const, path: asset.binaryName, compressionMethod: 8, uncompressedSize: asset.binaryBytes },
+		{ type: "File" as const, path: asset.harnessName, compressionMethod: 8, uncompressedSize: asset.harnessBytes },
+	];
+
+	it("accepts only the signed executable and harness layout", () => {
+		expect(() => validateRuntimeArchiveEntries(entries, asset)).not.toThrow();
+	});
+
+	it("rejects extra, traversing, or incorrectly sized members", () => {
+		expect(() =>
+			validateRuntimeArchiveEntries([...entries, { ...entries[0]!, path: "extra" }], asset),
+		).toThrow("unexpected number");
+		expect(() =>
+			validateRuntimeArchiveEntries([{ ...entries[0]!, path: "../agy_acp_server.par" }, entries[1]!], asset),
+		).toThrow("unexpected, unsafe");
+		expect(() =>
+			validateRuntimeArchiveEntries([{ ...entries[0]!, uncompressedSize: 1 }, entries[1]!], asset),
+		).toThrow("unexpected, unsafe");
+	});
+});
+
+describe("managed runtime migration", () => {
+	it("adopts a legacy install only when its signed hash and file sizes match", () => {
+		const root = temporaryDirectory();
+		const current = path.join(root, "current");
+		fs.mkdirSync(current);
+		fs.writeFileSync(path.join(current, "agy_acp_server.par"), "server", { mode: 0o755 });
+		fs.writeFileSync(path.join(current, "localharness_external"), "helper", { mode: 0o755 });
+		fs.writeFileSync(
+			path.join(current, "install-integrity.json"),
+			JSON.stringify({ version: "1.1.1", platform: "linux-x86_64", archiveSha256: "a".repeat(64) }),
+		);
+		adoptLegacyCurrentRelease(root, {
+			version: "1.1.1",
+			platform: "linux-x86_64",
+			archive: "https://dl.google.com/agy-extensions/releases/linux/test_1.1.1-linux.zip",
+			archiveSha256: "a".repeat(64),
+			archiveBytes: 20,
+			binaryName: "agy_acp_server.par",
+			binaryBytes: 6,
+			harnessName: "localharness_external",
+			harnessBytes: 6,
+			args: ["--uid="],
+		});
+		expect(JSON.parse(fs.readFileSync(path.join(current, "install-integrity.json"), "utf8"))).toMatchObject({
+			archiveBytes: 20,
+			binaryBytes: 6,
+			harnessBytes: 6,
+			binaryName: "agy_acp_server.par",
+		});
+	});
 });
 
 describe("managed runtime executable permissions", () => {

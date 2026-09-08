@@ -14,7 +14,8 @@ A first-class [Pi](https://github.com/earendil-works/pi) provider for **Google A
 - Supports persisted `default`, `auto-edit`, and `yolo` Antigravity permission modes. The requested default is `yolo`; switching to a prompting mode retains the single-use, fail-closed Pi permission broker.
 - Advertises no ACP filesystem or terminal client capabilities.
 - Provides setup, auth-health, logout/account-switching, qualification, quota, and runtime-update commands.
-- Uses a self-service ACP registry installer with exact Google artifact URLs, pinned archive SHA-256 hashes for every supported platform, Linux x64 binary verification, musl rejection, macOS quarantine cleanup, and Windows process-tree handling.
+- Automatically checks for newer managed ACP runtimes once per day, with `automatic`, `notify`, and `manual` update modes.
+- Uses an Ed25519-signed runtime catalog with exact Google artifact URLs, archive hashes and sizes, strict two-file extraction, pre-activation ACP identity/version validation, immutable releases, rollback retention, musl rejection, macOS quarantine cleanup, and Windows process-tree handling.
 
 ## New-user setup
 
@@ -47,7 +48,7 @@ In Pi:
 9. Press **Shift+Tab** to choose the reasoning effort. Flash models expose low, medium, and high; Pro exposes only the tiers advertised by Antigravity.
 10. Send a prompt. The default permission mode is `yolo`, so Antigravity-native commands and edits can run without confirmation.
 
-The provider first looks at `AGY_ACP_BIN`, `~/.local/bin/agy_acp_server.par`, the managed `~/.local/opt/agy-acp/current/` location, and `PATH`. If absent, it installs the platform build published in the ACP registry. A global `agy` or `gemini` command is not required.
+The provider first looks at `AGY_ACP_BIN`, then its verified managed `~/.local/opt/agy-acp/current/` release, `~/.local/bin/agy_acp_server.par`, and `PATH`. Set `AGY_ACP_BIN` to explicitly prefer an externally managed runtime. If absent, it installs the platform build published in the ACP registry. A global `agy` or `gemini` command is not required.
 
 ### SSH and headless Google login
 
@@ -73,6 +74,7 @@ Antigravity owns OAuth tokens under `~/.gemini/antigravity-acp/`; Pi stores only
 /antigravity-acp status
 /antigravity-acp quota
 /antigravity-acp update
+/antigravity-acp updates [automatic|notify|manual]
 /antigravity-acp qualify
 /antigravity-acp logout
 /antigravity-acp account
@@ -82,9 +84,9 @@ Antigravity owns OAuth tokens under `~/.gemini/antigravity-acp/`; Pi stores only
 /antigravity-acp permissions yolo
 ```
 
-Permission mode is saved in `~/.pi/agent/antigravity-acp-provider/config.json` and applied immediately to active compatible sessions as well as future sessions. ACP session bindings are saved beside it in `sessions.json`.
+Permission and runtime-update modes are saved in `~/.pi/agent/antigravity-acp-provider/config.json`. Runtime updates default to `automatic`; only provider-managed installations are replaced. ACP session bindings are saved beside the config in `sessions.json`.
 
-`logout`/`account` clears local Antigravity credentials and saved ACP sessions. Run Pi's `/logout` afterward to remove the Pi credential marker, then `/login` for the new account. `update` only installs the runtime version pinned by this package; install a newer provider release to trust a newer upstream runtime.
+`logout`/`account` clears local Antigravity credentials and saved ACP sessions. Run Pi's `/logout` afterward to remove the Pi credential marker, then `/login` for the new account. `update` checks the official registry and installs its newest release only after matching it to the provider's signed runtime catalog. See [`docs/RUNTIME-UPDATES.md`](docs/RUNTIME-UPDATES.md).
 
 ## Development
 
@@ -95,6 +97,10 @@ npm run test:live      # sends a real authenticated prompt
 npm run test:qualify   # live cancel, restore, MCP, model, and permission qualification
 npm run test:packed
 npm audit --audit-level=high
+
+# Maintainer-only runtime catalog refresh/signing
+npm run refresh:runtime-manifest
+ACP_RUNTIME_MANIFEST_PRIVATE_KEY_PATH=/secure/key.pem npm run sign:runtime-manifest
 ```
 
 ## Security boundary
@@ -103,7 +109,7 @@ This launches a full coding agent with the user's OS privileges. **The default `
 
 ## Compatibility
 
-The implementation is pinned to Pi 0.85.0, ACP SDK 0.19.1, Antigravity ACP 1.1.1, and ACP protocol 1. ACP session setup allows up to two minutes for slow first-run initialization, while transport shutdown rejects pending requests immediately. The official registry currently provides Linux x64/ARM64, Windows x64/ARM64, and macOS ARM64 artifacts. Intel macOS has no pinned artifact, and Alpine/musl is rejected because Google's Linux build targets glibc.
+The implementation is pinned to Pi 0.85.0, ACP SDK 0.19.1, and ACP protocol 1. The bundled signed catalog bootstraps Antigravity ACP 1.1.1 and can accept newer signed catalog releases without an npm update. ACP session setup allows up to two minutes for slow first-run initialization, while transport shutdown rejects pending requests immediately. The official registry currently provides Linux x64/ARM64, Windows x64/ARM64, and macOS ARM64 artifacts. Intel macOS has no pinned artifact, and Alpine/musl is rejected because Google's Linux build targets glibc.
 
 During browser authentication, Chromium may write `Opening in existing browser session.` to the ACP process's inherited stdout. The transport ignores only that exact known compatibility line and reports its count in `doctor`; all other non-JSON stdout remains a fatal protocol error.
 

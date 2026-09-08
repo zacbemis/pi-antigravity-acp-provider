@@ -6,18 +6,23 @@ import { Type } from "typebox";
 
 import { inspectAntigravityAuth } from "../src/acp/antigravity.js";
 import { resolveAntigravityAcpEntry } from "../src/acp/process.js";
-import { updateAntigravityAcpRuntime } from "../src/acp/setup.js";
+import {
+	checkAntigravityAcpUpdate,
+	inspectRuntimeSetup,
+	updateAntigravityAcpRuntime,
+} from "../src/acp/setup.js";
 import {
 	isPermissionMode,
+	isRuntimeUpdateMode,
 	loadConfig,
 	permissionModeLabel,
 	savePermissionMode,
+	saveRuntimeUpdateMode,
 	type PermissionMode,
 } from "../src/config.js";
 import {
 	ACP_PROTOCOL_VERSION,
 	ACP_SDK_VERSION,
-	ANTIGRAVITY_ACP_VERSION,
 	PACKAGE_VERSION,
 } from "../src/constants.js";
 import { createAntigravityProvider } from "../src/provider.js";
@@ -84,10 +89,27 @@ export default function antigravityAcpExtension(pi: ExtensionAPI): void {
 				const result = await updateAntigravityAcpRuntime((message) => ctx.ui.notify(message, "info"));
 				ctx.ui.notify(
 					result.changed
-						? `Installed Antigravity ACP ${result.version}. Restart Pi to move active sessions to it.`
-						: `Antigravity ACP ${result.version} is already installed and pinned.`,
+						? `Installed verified Antigravity ACP ${result.version}. Restart Pi to move active sessions to it.`
+						: `Antigravity ACP ${result.version} is already the latest signed release.`,
 					"info",
 				);
+				return;
+			}
+			if (command === "updates" || command.startsWith("updates ")) {
+				const requested = command.slice("updates".length).trim();
+				if (!requested) {
+					ctx.ui.notify(`Antigravity runtime updates: ${loadConfig().runtimeUpdates}`, "info");
+					return;
+				}
+				if (!isRuntimeUpdateMode(requested)) {
+					ctx.ui.notify(
+						"Usage: /antigravity-acp updates [automatic|notify|manual]",
+						"warning",
+					);
+					return;
+				}
+				saveRuntimeUpdateMode(requested);
+				ctx.ui.notify(`Antigravity runtime updates: ${requested}`, "info");
 				return;
 			}
 			if (command === "logout" || command === "account" || command === "switch-account") {
@@ -140,7 +162,7 @@ export default function antigravityAcpExtension(pi: ExtensionAPI): void {
 			const verbose = command === "doctor --verbose";
 			if (command !== "doctor" && command !== "status" && !verbose) {
 				ctx.ui.notify(
-					"Usage: /antigravity-acp [setup|doctor|status|quota|update|logout|account|qualify|permissions]",
+					"Usage: /antigravity-acp [setup|doctor|status|quota|update|updates|logout|account|qualify|permissions]",
 					"warning",
 				);
 				return;
@@ -153,10 +175,12 @@ export default function antigravityAcpExtension(pi: ExtensionAPI): void {
 			}
 			const snapshot = await runtime.snapshot(verbose);
 			const auth = inspectAntigravityAuth();
+			const setup = inspectRuntimeSetup();
+			const update = await checkAntigravityAcpUpdate().catch(() => undefined);
 			ctx.ui.notify(
 				[
 					`Antigravity ACP provider ${PACKAGE_VERSION}`,
-					`Runtime: Antigravity ACP ${ANTIGRAVITY_ACP_VERSION}, ACP SDK ${ACP_SDK_VERSION}, protocol ${ACP_PROTOCOL_VERSION}`,
+					`Runtime: installed=${setup.installedVersion ?? "external/unknown"} approved=${update?.approvedVersion ?? setup.approvedVersion} registry=${update?.latestVersion ?? "unavailable"} updates=${setup.updateMode}; ACP SDK ${ACP_SDK_VERSION}, protocol ${ACP_PROTOCOL_VERSION}`,
 					`Antigravity server: ${entry}`,
 					`Authentication: ${auth.status}${auth.authType ? ` (${auth.authType})` : ""}`,
 					`Permission mode: ${permissionModeLabel(snapshot.permissionMode)}`,
@@ -175,6 +199,28 @@ export default function antigravityAcpExtension(pi: ExtensionAPI): void {
 	pi.registerCommand("gemini-acp", {
 		...commandDefinition,
 		description: "Deprecated alias for /antigravity-acp",
+	});
+
+	pi.on("session_start", async (_event, ctx) => {
+		if (loadConfig().runtimeUpdates !== "notify") return;
+		try {
+			const update = await checkAntigravityAcpUpdate();
+			if (update.approvalPending) {
+				ctx.ui.notify(
+					`Antigravity ACP ${update.latestVersion} is published but is still awaiting a signed runtime manifest.`,
+					"warning",
+				);
+			} else if (update.updateAvailable) {
+				ctx.ui.notify(
+					update.managed
+						? `Antigravity ACP ${update.approvedVersion} is available. Run /antigravity-acp update.`
+						: `Antigravity ACP ${update.approvedVersion} is available, but the selected external runtime must be updated manually.`,
+					"info",
+				);
+			}
+		} catch {
+			// Update checks are advisory and must not interrupt Pi startup.
+		}
 	});
 
 	pi.on("session_shutdown", async () => {
