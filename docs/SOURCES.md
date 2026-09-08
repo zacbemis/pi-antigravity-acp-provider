@@ -30,7 +30,7 @@ Because the Gemini source checkout was ahead of npm stable, all behavior used fo
 Local baseline:
 
 ```text
-/home/zacb/.nvm/versions/node/v24.19.0/lib/node_modules/
+~/.nvm/versions/node/v24.19.0/lib/node_modules/
   @earendil-works/pi-coding-agent/docs/custom-provider.md
   @earendil-works/pi-coding-agent/docs/extensions.md
   @earendil-works/pi-coding-agent/docs/models.md
@@ -79,7 +79,7 @@ For reproducible source references, replace `main` in links with the tested comm
 Installed baseline files:
 
 ```text
-/home/zacb/.pi/agent/npm/node_modules/@estebanforge/pi-antigravity-bridge/
+~/.pi/agent/npm/node_modules/@estebanforge/pi-antigravity-bridge/
   README.md
   package.json
   docs/ACP-ADOPTION-PLAN.md
