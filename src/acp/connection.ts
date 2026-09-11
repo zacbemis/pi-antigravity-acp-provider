@@ -40,6 +40,7 @@ export class AntigravityAcpConnection {
 	private readonly connection: ClientSideConnection;
 	private readonly operationTimeoutMs: number;
 	private readonly protocolFailure: Promise<never>;
+	private readonly processFailure: Promise<never>;
 	private handlers: AntigravityConnectionHandlers;
 	private closePromise?: Promise<void>;
 
@@ -54,6 +55,17 @@ export class AntigravityAcpConnection {
 		// Keep the rejection observed even if output fails while no request is
 		// active. Individual operations still race against the original promise.
 		void this.protocolFailure.catch(() => undefined);
+		this.processFailure = this.process.exited.then(({ code, signal, stderrTail }) => {
+			const status = signal ? `signal ${signal}` : `code ${String(code)}`;
+			const detail = stderrTail.trim() ? `: ${stderrTail.trim()}` : "";
+			throw new AntigravityAcpError(
+				"process_exit",
+				`Antigravity ACP process exited with ${status}${detail}`,
+			);
+		});
+		// Process exit is expected during close; observe it here while active
+		// operations race against the original rejecting promise below.
+		void this.processFailure.catch(() => undefined);
 		const stream = boundedNdjsonStream(this.process.output, this.process.input, {
 			...(options.maxFrameBytes === undefined ? {} : { maxFrameBytes: options.maxFrameBytes }),
 			onCompatibilityNoise: () => this.process.recordCompatibilityNoise(),
@@ -268,6 +280,7 @@ export class AntigravityAcpConnection {
 					throw classifyError(error);
 				}),
 				this.protocolFailure,
+				this.processFailure,
 				new Promise<never>((_resolve, reject) => {
 					timer = setTimeout(() => {
 						void this.close();
