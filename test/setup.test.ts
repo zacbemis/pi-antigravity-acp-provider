@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { readBundledRuntimeManifest, latestManifestRelease } from "../src/acp/runtime-manifest.js";
 import {
 	adoptLegacyCurrentRelease,
+	isExpectedRuntimeIdentity,
 	repairRuntimeExecutablePermissions,
 	validateRuntimeArchiveEntries,
 	updateAntigravityAcpRuntime,
@@ -54,6 +55,41 @@ describe("managed runtime archive validation", () => {
 		expect(() =>
 			validateRuntimeArchiveEntries([{ ...entries[0]!, uncompressedSize: 1 }, entries[1]!], asset),
 		).toThrow("unexpected, unsafe");
+	});
+});
+
+describe("managed runtime process validation", () => {
+	it("accepts Google's prefixed release version", () => {
+		expect(
+			isExpectedRuntimeIdentity(
+				{
+					protocolVersion: 1,
+					agentInfo: { name: "antigravity-acp", version: "agy_acp_server_1.1.1" },
+				},
+				"1.1.1",
+			),
+		).toBe(true);
+	});
+
+	it("also accepts a bare semver but rejects other identities", () => {
+		expect(
+			isExpectedRuntimeIdentity(
+				{ protocolVersion: 1, agentInfo: { name: "antigravity-acp", version: "1.1.1" } },
+				"1.1.1",
+			),
+		).toBe(true);
+		expect(
+			isExpectedRuntimeIdentity(
+				{ protocolVersion: 1, agentInfo: { name: "antigravity-acp", version: "agy_acp_server_1.1.2" } },
+				"1.1.1",
+			),
+		).toBe(false);
+		expect(
+			isExpectedRuntimeIdentity(
+				{ protocolVersion: 1, agentInfo: { name: "other-agent", version: "agy_acp_server_1.1.1" } },
+				"1.1.1",
+			),
+		).toBe(false);
 	});
 });
 

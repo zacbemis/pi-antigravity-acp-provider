@@ -411,6 +411,24 @@ export function validateRuntimeArchiveEntries(
 	if (expected.size !== 0) throw new Error("ACP archive is missing a required runtime file");
 }
 
+export function isExpectedRuntimeIdentity(
+	initialized: {
+		protocolVersion: number;
+		agentInfo?: { name: string; version: string } | null;
+	},
+	releaseVersion: string,
+): boolean {
+	// Google reports the release as "agy_acp_server_<semver>" even though the
+	// registry and signed manifest use bare semver. Accept both representations,
+	// but keep the agent name and complete version match strict.
+	const reportedVersion = initialized.agentInfo?.version;
+	return (
+		initialized.protocolVersion === 1 &&
+		initialized.agentInfo?.name === "antigravity-acp" &&
+		(reportedVersion === releaseVersion || reportedVersion === `agy_acp_server_${releaseVersion}`)
+	);
+}
+
 async function validateRuntime(directory: string, release: ResolvedRuntimeRelease): Promise<void> {
 	const connection = new AntigravityAcpConnection({
 		cwd: directory,
@@ -421,11 +439,7 @@ async function validateRuntime(directory: string, release: ResolvedRuntimeReleas
 	});
 	try {
 		const initialized = await connection.initialize();
-		if (
-			initialized.protocolVersion !== 1 ||
-			initialized.agentInfo?.name !== "antigravity-acp" ||
-			initialized.agentInfo.version !== release.version
-		) {
+		if (!isExpectedRuntimeIdentity(initialized, release.version)) {
 			throw new Error("Downloaded runtime did not identify as the expected Antigravity ACP release");
 		}
 	} finally {
