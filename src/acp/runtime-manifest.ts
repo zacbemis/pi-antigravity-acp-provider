@@ -71,7 +71,7 @@ export function parseTrustedRuntimeManifest(text: string): TrustedRuntimeManifes
 	) {
 		throw new Error("Antigravity runtime manifest signature is invalid");
 	}
-	validateManifest(payload.releases);
+	validateRuntimeReleases(payload.releases);
 	return candidate as TrustedRuntimeManifest;
 }
 
@@ -101,7 +101,11 @@ export function canonicalJson(value: unknown): string {
 	return JSON.stringify(value) ?? "null";
 }
 
-function validateManifest(releases: RuntimeRelease[]): void {
+export function isRuntimePlatform(platform: string): boolean {
+	return /^(darwin|linux|windows)-(aarch64|x86_64)$/u.test(platform);
+}
+
+export function validateRuntimeReleases(releases: RuntimeRelease[]): void {
 	const versions = new Set<string>();
 	for (const release of releases) {
 		if (!release || typeof release !== "object") throw new Error("Runtime release entry is invalid");
@@ -116,7 +120,7 @@ function validateManifest(releases: RuntimeRelease[]): void {
 }
 
 function validateAsset(platform: string, version: string, asset: RuntimeReleaseAsset): void {
-	if (!/^(darwin|linux|windows)-(aarch64|x86_64)$/u.test(platform)) {
+	if (!isRuntimePlatform(platform)) {
 		throw new Error(`Runtime manifest platform is invalid: ${platform}`);
 	}
 	if (!asset || typeof asset !== "object") throw new Error(`Runtime manifest asset is invalid: ${platform}`);
@@ -135,7 +139,7 @@ function validateAsset(platform: string, version: string, asset: RuntimeReleaseA
 	}
 }
 
-function validateGoogleArchiveUrl(value: string, version: string): void {
+export function validateGoogleArchiveUrl(value: string, version: string): void {
 	let url: URL;
 	try {
 		url = new URL(value);
@@ -145,15 +149,27 @@ function validateGoogleArchiveUrl(value: string, version: string): void {
 	if (
 		url.protocol !== "https:" ||
 		url.hostname !== "dl.google.com" ||
+		url.username ||
+		url.password ||
+		url.port ||
 		!url.pathname.startsWith("/agy-extensions/releases/") ||
 		url.search ||
 		url.hash
 	) {
 		throw new Error("Runtime manifest archive is not a trusted Google release URL");
 	}
-	if (!url.pathname.split("/").at(-1)?.includes(`_${version}-`)) {
+	if (!archiveNameMatchesVersion(url.pathname.split("/").at(-1) ?? "", version)) {
 		throw new Error("Runtime manifest archive version does not match its release");
 	}
+}
+
+// Google has shipped both "agy-acp-server-agy_acp_server_1.1.1-linux-x86_64.zip"
+// and "agy-acp-server-1.2.1-linux-x86_64.zip", so match the version as a whole
+// "-" or "_" delimited token rather than one exact naming scheme.
+export function archiveNameMatchesVersion(fileName: string, version: string): boolean {
+	versionParts(version);
+	const token = version.replaceAll(".", "\\.");
+	return new RegExp(`(?:^|[-_])${token}(?:[-_]|\\.zip$)`, "u").test(fileName);
 }
 
 function versionParts(value: string): [number, number, number] {

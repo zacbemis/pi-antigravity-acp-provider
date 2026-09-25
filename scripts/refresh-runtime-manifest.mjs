@@ -5,6 +5,15 @@ import path from "node:path";
 import { pipeline } from "node:stream/promises";
 import { Open } from "unzipper";
 
+// Reuse the client-side validators so this script can never approve a
+// manifest that installed providers would reject.
+import {
+	compareRuntimeVersions,
+	isRuntimePlatform,
+	validateGoogleArchiveUrl,
+	validateRuntimeReleases,
+} from "../src/acp/runtime-manifest.ts";
+
 const REGISTRY_URL =
 	"https://raw.githubusercontent.com/agentclientprotocol/registry/main/antigravity-acp/agent.json";
 const MAX_ARCHIVE_BYTES = 4 * 1024 * 1024 * 1024;
@@ -26,13 +35,18 @@ const temporary = fs.mkdtempSync(path.join(os.tmpdir(), "antigravity-runtime-man
 try {
 	const platforms = {};
 	for (const [platform, entry] of Object.entries(entries)) {
-		if (!["darwin-aarch64", "linux-x86_64", "linux-aarch64", "windows-x86_64", "windows-aarch64"].includes(platform)) {
-			throw new Error(`Unsupported registry platform: ${platform}`);
+		if (!isRuntimePlatform(platform)) {
+			console.log(`::warning::Skipping registry platform the provider cannot run on: ${platform}`);
+			continue;
 		}
 		const windows = platform.startsWith("windows-");
 		const binaryName = windows ? "agy_acp_server.exe" : "agy_acp_server.par";
 		const harnessName = windows ? "localharness_external.exe" : "localharness_external";
-		validateArchiveUrl(entry.archive, version);
+		try {
+			validateGoogleArchiveUrl(entry.archive, version);
+		} catch (cause) {
+			throw new Error(`Untrusted registry archive URL for ${platform}: ${entry.archive}`, { cause });
+		}
 		const commandName = path.posix.basename(String(entry.cmd ?? binaryName).replaceAll("\\", "/"));
 		if (commandName !== binaryName) throw new Error(`Unexpected registry command for ${platform}`);
 		const archivePath = path.join(temporary, `${platform}.zip`);
@@ -67,10 +81,13 @@ try {
 		};
 		fs.rmSync(archivePath, { force: true });
 	}
-	manifest.generatedAt = new Date().toISOString();
-	manifest.releases = [...manifest.releases, { version, platforms }]
-		.sort((left, right) => compareVersions(left.version, right.version))
+	if (Object.keys(platforms).length === 0) throw new Error(`Registry has no supported platforms for ${version}`);
+	const releases = [...manifest.releases, { version, platforms }]
+		.sort((left, right) => compareRuntimeVersions(left.version, right.version))
 		.slice(-5);
+	validateRuntimeReleases(releases);
+	manifest.generatedAt = new Date().toISOString();
+	manifest.releases = releases;
 	manifest.signature = "";
 	fs.writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
 	console.log(`Added Antigravity ACP ${version}; sign runtime-manifest.json before publishing.`);
@@ -93,28 +110,4 @@ async function download(url, destination) {
 	});
 	await pipeline(response.body.pipeThrough(meter), fs.createWriteStream(destination, { flags: "wx", mode: 0o600 }));
 	return { bytes, sha256: hash.digest("hex") };
-}
-
-function validateArchiveUrl(value, version) {
-	const url = new URL(value);
-	if (
-		url.protocol !== "https:" ||
-		url.hostname !== "dl.google.com" ||
-		url.username || url.password || url.port ||
-		!url.pathname.startsWith("/agy-extensions/releases/") ||
-		url.search ||
-		url.hash ||
-		!path.posix.basename(url.pathname).includes(`_${version}-`)
-	) {
-		throw new Error(`Untrusted registry archive URL: ${value}`);
-	}
-}
-
-function compareVersions(left, right) {
-	const a = left.split(".").map(Number);
-	const b = right.split(".").map(Number);
-	for (let index = 0; index < 3; index++) {
-		if (a[index] !== b[index]) return a[index] - b[index];
-	}
-	return 0;
 }
