@@ -1,6 +1,24 @@
 #!/usr/bin/env node
 
+import fs from "node:fs";
 import { spawn } from "node:child_process";
+
+// On NixOS and minimal Linux environments without /etc/ssl/cert.pem,
+// bundled Python/OpenSSL fails certificate verification unless SSL_CERT_FILE is set.
+if (!process.env.SSL_CERT_FILE) {
+	for (const candidate of [
+		"/etc/ssl/certs/ca-bundle.crt",
+		"/etc/ssl/certs/ca-certificates.crt",
+		"/etc/pki/tls/certs/ca-bundle.crt",
+		"/etc/ssl/ca-bundle.pem",
+		"/etc/ssl/cert.pem",
+	]) {
+		if (fs.existsSync(candidate)) {
+			process.env.SSL_CERT_FILE = candidate;
+			break;
+		}
+	}
+}
 
 const forwarded = process.argv.slice(2);
 const genericCommand = forwarded[0] === "--command";
