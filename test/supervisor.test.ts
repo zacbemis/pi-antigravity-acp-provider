@@ -6,7 +6,7 @@ import readline from "node:readline";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { AntigravityProcess, resolveSupervisorEntry } from "../src/acp/process.js";
+import { AntigravityProcess, resolveNodeBinary, resolveSupervisorEntry } from "../src/acp/process.js";
 
 const parentFixture = fileURLToPath(new URL("./fixtures/watchdog-parent.mjs", import.meta.url));
 const agentFixture = fileURLToPath(new URL("./fixtures/long-agent.mjs", import.meta.url));
@@ -23,6 +23,31 @@ afterEach(() => {
 		}
 	}
 	cleanupPids.clear();
+});
+
+describe("resolveNodeBinary", () => {
+	it("preserves standard node executables", () => {
+		expect(resolveNodeBinary("/usr/bin/node")).toBe("/usr/bin/node");
+		expect(resolveNodeBinary("/usr/local/bin/node")).toBe("/usr/local/bin/node");
+		expect(resolveNodeBinary("C:\\Program Files\\nodejs\\node.exe")).toBe("C:\\Program Files\\nodejs\\node.exe");
+	});
+
+	it("falls back to ambient node when process.execPath is a standalone binary like pi", () => {
+		expect(resolveNodeBinary("/nix/store/ai9szyf9fivph9rdk65gzjiy30sll754-pi-0.87.1/libexec/pi/pi")).toBe("node");
+		expect(resolveNodeBinary("/usr/local/bin/pi")).toBe("node");
+		expect(resolveNodeBinary("C:\\bin\\pi.exe")).toBe("node");
+	});
+
+	it("respects custom NODE environment variable override", () => {
+		const original = process.env.NODE;
+		try {
+			process.env.NODE = "/opt/custom/bin/node";
+			expect(resolveNodeBinary()).toBe("/opt/custom/bin/node");
+		} finally {
+			if (original === undefined) delete process.env.NODE;
+			else process.env.NODE = original;
+		}
+	});
 });
 
 describe.skipIf(process.platform === "win32")("parent-death supervisor", () => {

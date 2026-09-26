@@ -34,6 +34,16 @@ export function resolveAntigravityAcpEntry(): string {
 	return resolveAntigravityAcpLaunch().command;
 }
 
+export function resolveNodeBinary(execPath?: string): string {
+	const candidate = execPath || process.env.NODE || process.execPath;
+	const base = (candidate.split(/[\\/]/).pop() ?? "").toLowerCase();
+	// When Pi is distributed as a standalone executable (e.g. NixOS package,
+	// SEA, or packaged release), process.execPath points to the pi binary rather
+	// than node. Fall back to standard ambient node in that case.
+	if (/^node(?:\.exe|\.cmd|\.bat)?$/i.test(base)) return candidate;
+	return "node";
+}
+
 export class AntigravityProcess {
 	readonly generation = nextGeneration++;
 	readonly child: ChildProcessWithoutNullStreams;
@@ -52,10 +62,11 @@ export class AntigravityProcess {
 			command = options.command;
 			args = options.args ?? [];
 		} else {
+			const nodeBinary = resolveNodeBinary(options.env?.NODE);
 			const launch = options.entryPath
-				? { command: process.execPath, args: [options.entryPath, ...(options.args ?? [])] }
+				? { command: nodeBinary, args: [options.entryPath, ...(options.args ?? [])] }
 				: resolveAntigravityAcpLaunch();
-			command = process.execPath;
+			command = nodeBinary;
 			args = [resolveSupervisorEntry(), "--command", launch.command, ...launch.args];
 		}
 		let resolveExit!: (exit: ProcessExit) => void;
