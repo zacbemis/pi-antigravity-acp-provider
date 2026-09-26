@@ -37,7 +37,7 @@ jobs:
           versions=$(npm view "$name" versions --json)
           if node -e 'process.exit(JSON.parse(process.argv[1]).includes(process.argv[2]) ? 0 : 1)' "$versions" "$version"; then
             published=$(npm view "$name@$version" dist.shasum)
-            local_shasum=$(npm pack --dry-run --ignore-scripts --json | node -e 'let s = ""; process.stdin.on("data", c => s += c).on("end", () => console.log(JSON.parse(s)[0].shasum))')
+            local_shasum=$(npm pack --dry-run --ignore-scripts --json | node -e 'let s = ""; process.stdin.on("data", c => s += c).on("end", () => { const data = JSON.parse(s); const pack = Array.isArray(data) ? data[0] : data[process.argv[1]]; if (!pack?.shasum) throw new Error("Missing package shasum"); console.log(pack.shasum) })' "$name")
             if [ "$published" != "$local_shasum" ]; then
               echo "Published $name@$version differs from this tag; refusing to skip" >&2
               exit 1
