@@ -6,7 +6,13 @@ import readline from "node:readline";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { AntigravityProcess, resolveSupervisorEntry } from "../src/acp/process.js";
+import {
+	AntigravityProcess,
+	applyDefaultTlsEnvironment,
+	DEFAULT_CA_BUNDLE_PATHS,
+	resolveDefaultSslCertFile,
+	resolveSupervisorEntry,
+} from "../src/acp/process.js";
 
 const parentFixture = fileURLToPath(new URL("./fixtures/watchdog-parent.mjs", import.meta.url));
 const agentFixture = fileURLToPath(new URL("./fixtures/long-agent.mjs", import.meta.url));
@@ -25,6 +31,31 @@ afterEach(() => {
 	cleanupPids.clear();
 });
 
+describe("applyDefaultTlsEnvironment", () => {
+	it("preserves explicit SSL_CERT_FILE if present and existing", () => {
+		const exists = (p: string) => p === "/custom/ca.crt";
+		const env = applyDefaultTlsEnvironment({ SSL_CERT_FILE: "/custom/ca.crt" }, exists);
+		expect(env.SSL_CERT_FILE).toBe("/custom/ca.crt");
+	});
+
+	it("falls back to NIX_SSL_CERT_FILE if present and existing", () => {
+		const exists = (p: string) => p === "/nix/ca.crt";
+		const env = applyDefaultTlsEnvironment({ NIX_SSL_CERT_FILE: "/nix/ca.crt" }, exists);
+		expect(env.SSL_CERT_FILE).toBe("/nix/ca.crt");
+	});
+
+	it("resolves the first existing candidate when SSL_CERT_FILE is not set", () => {
+		const exists = (p: string) => p === "/etc/ssl/certs/ca-bundle.crt";
+		const env = applyDefaultTlsEnvironment({}, exists);
+		expect(env.SSL_CERT_FILE).toBe("/etc/ssl/certs/ca-bundle.crt");
+	});
+
+	it("leaves SSL_CERT_FILE unset when no candidates exist", () => {
+		const exists = () => false;
+		const env = applyDefaultTlsEnvironment({}, exists);
+		expect(env.SSL_CERT_FILE).toBeUndefined();
+	});
+});
 describe.skipIf(process.platform === "win32")("parent-death supervisor", () => {
 	it("escalates from TERM to KILL for a stuck direct child", async () => {
 		const child = new AntigravityProcess({
