@@ -1,6 +1,6 @@
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
+import { resolvePiAgentDir } from "../config.js";
 import { withStoreLock } from "./store-lock.js";
 
 export interface SavedSessionRecord {
@@ -14,18 +14,15 @@ export interface SavedSessionRecord {
 	lastActive: number;
 }
 
-const DEFAULT_PATH = path.join(
-	os.homedir(),
-	".pi",
-	"agent",
-	"antigravity-acp-provider",
-	"sessions.json",
-);
+export function resolveSessionStorePath(): string {
+	return path.join(resolvePiAgentDir(), "antigravity-acp-provider", "sessions.json");
+}
+
 const MAX_RECORDS = 256;
 const MAX_AGE_MS = 30 * 24 * 60 * 60_000;
 
 export class AcpSessionStore {
-	constructor(private readonly file = DEFAULT_PATH) {}
+	constructor(private readonly file = resolveSessionStorePath()) {}
 
 	get(piSessionId: string): SavedSessionRecord | undefined {
 		return this.read()

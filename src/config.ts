@@ -10,18 +10,39 @@ export interface AntigravityAcpConfig {
 	runtimeUpdates: RuntimeUpdateMode;
 }
 
-const CONFIG_ROOT = path.join(os.homedir(), ".pi", "agent", "antigravity-acp-provider");
-export const CONFIG_PATH = path.join(CONFIG_ROOT, "config.json");
-export const LEGACY_CONFIG_PATH = path.join(
-	os.homedir(),
-	".pi",
-	"agent",
-	"gemini-acp-provider",
-	"config.json",
-);
+export function resolvePiAgentDir(): string {
+	const custom = process.env.PI_CODING_AGENT_DIR?.trim();
+	if (custom) {
+		return custom === "~" || custom.startsWith("~/")
+			? path.join(os.homedir(), custom.slice(1))
+			: custom;
+	}
+	return path.join(os.homedir(), ".pi", "agent");
+}
 
-export function loadConfig(file = CONFIG_PATH): AntigravityAcpConfig {
-	if (file === CONFIG_PATH) migrateLegacyConfig();
+export function resolveConfigRoot(): string {
+	return path.join(resolvePiAgentDir(), "antigravity-acp-provider");
+}
+
+export function resolveConfigPath(): string {
+	return path.join(resolveConfigRoot(), "config.json");
+}
+
+export function resolveDefaultPiConfigPath(): string {
+	return path.join(os.homedir(), ".pi", "agent", "antigravity-acp-provider", "config.json");
+}
+
+export function resolveLegacyGeminiConfigPath(): string {
+	return path.join(os.homedir(), ".pi", "agent", "gemini-acp-provider", "config.json");
+}
+
+export const DEFAULT_CONFIG_PATH = resolveDefaultPiConfigPath();
+export const LEGACY_GEMINI_CONFIG_PATH = resolveLegacyGeminiConfigPath();
+
+export const CONFIG_PATH = resolveConfigPath();
+
+export function loadConfig(file = resolveConfigPath()): AntigravityAcpConfig {
+	if (file === resolveConfigPath()) migrateConfig(file);
 	try {
 		const parsed = JSON.parse(fs.readFileSync(file, "utf8")) as {
 			permissions?: unknown;
@@ -37,11 +58,11 @@ export function loadConfig(file = CONFIG_PATH): AntigravityAcpConfig {
 	return { permissions: "yolo", runtimeUpdates: "automatic" };
 }
 
-export function savePermissionMode(mode: PermissionMode, file = CONFIG_PATH): void {
+export function savePermissionMode(mode: PermissionMode, file = resolveConfigPath()): void {
 	writeConfig({ ...loadConfig(file), permissions: mode }, file);
 }
 
-export function saveRuntimeUpdateMode(mode: RuntimeUpdateMode, file = CONFIG_PATH): void {
+export function saveRuntimeUpdateMode(mode: RuntimeUpdateMode, file = resolveConfigPath()): void {
 	writeConfig({ ...loadConfig(file), runtimeUpdates: mode }, file);
 }
 
@@ -53,12 +74,27 @@ function writeConfig(config: AntigravityAcpConfig, file: string): void {
 	fs.renameSync(temporary, file);
 }
 
-function migrateLegacyConfig(): void {
-	if (fs.existsSync(CONFIG_PATH) || !fs.existsSync(LEGACY_CONFIG_PATH)) return;
+function migrateConfig(targetFile = resolveConfigPath()): void {
+	if (fs.existsSync(targetFile)) return;
+
+	const defaultPiConfig = resolveDefaultPiConfigPath();
+	if (targetFile !== defaultPiConfig && fs.existsSync(defaultPiConfig)) {
+		copyConfig(defaultPiConfig, targetFile);
+		return;
+	}
+
+	const legacyGeminiConfig = resolveLegacyGeminiConfigPath();
+	if (fs.existsSync(legacyGeminiConfig)) {
+		copyConfig(legacyGeminiConfig, targetFile);
+		return;
+	}
+}
+
+function copyConfig(source: string, destination: string): void {
 	try {
-		fs.mkdirSync(CONFIG_ROOT, { recursive: true, mode: 0o700 });
-		fs.copyFileSync(LEGACY_CONFIG_PATH, CONFIG_PATH, fs.constants.COPYFILE_EXCL);
-		fs.chmodSync(CONFIG_PATH, 0o600);
+		fs.mkdirSync(path.dirname(destination), { recursive: true, mode: 0o700 });
+		fs.copyFileSync(source, destination, fs.constants.COPYFILE_EXCL);
+		fs.chmodSync(destination, 0o600);
 	} catch {
 		// Migration is best-effort; defaults remain available.
 	}
