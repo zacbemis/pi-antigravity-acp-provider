@@ -33,9 +33,10 @@ import {
 	type PermissionToolResult,
 } from "../src/runtime.js";
 import { runSetupWizard } from "../src/wizard.js";
+import { registerToolActivity } from "./tool-activity.js";
 
 export default function antigravityAcpExtension(pi: ExtensionAPI): void {
-	const runtime = new AntigravityRuntime(undefined, loadConfig().permissions);
+	const runtime = new AntigravityRuntime(undefined, loadConfig().permissions, undefined, registerToolActivity(pi));
 	const { provider } = createAntigravityProvider(runtime);
 	pi.registerProvider(provider);
 

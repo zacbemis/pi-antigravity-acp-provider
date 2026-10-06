@@ -25,7 +25,7 @@ import {
 	PERMISSION_TOOL_NAME,
 } from "./constants.js";
 export { MANAGED_AUTH_MARKER, PERMISSION_RESULT_KIND, PERMISSION_TOOL_NAME } from "./constants.js";
-import { mapSessionUpdate } from "./acp/events.js";
+import { AcpToolTracker, type AcpToolActivity, mapSessionUpdate, toolActivityDetails } from "./acp/events.js";
 import { ensureAntigravityAcpReady } from "./acp/setup.js";
 import { HeadlessOAuthRelay, shouldUseHeadlessOAuth } from "./acp/headless-oauth.js";
 import {
@@ -78,6 +78,7 @@ interface Binding {
 	toolBatchTimer: ReturnType<typeof setTimeout> | undefined;
 	bridge: PiMcpBridge | undefined;
 	toolFingerprint: string;
+	toolTracker: AcpToolTracker;
 	turnCompletion: Promise<void> | undefined;
 	abortRequested: boolean;
 	piSessionId: string | undefined;
@@ -140,6 +141,7 @@ export class AntigravityRuntime {
 		connectionFactory?: AntigravityConnectionFactory,
 		permissionMode: PermissionMode = "yolo",
 		sessionStore?: AcpSessionStore,
+		private readonly onToolActivity?: (activity: AcpToolActivity) => void,
 	) {
 		this.connectionFactory = connectionFactory ?? ((options) => new AntigravityAcpConnection(options));
 		this.ensureAgent = connectionFactory === undefined;
@@ -454,6 +456,7 @@ export class AntigravityRuntime {
 			binding.turnCompletion = new Promise<void>((resolve) => {
 				completeTurn = resolve;
 			});
+			binding.toolTracker.clear();
 			const response = await binding.connection.prompt(
 				{ sessionId: binding.session.sessionId, prompt: parts.prompt },
 				options.signal,
@@ -629,6 +632,7 @@ export class AntigravityRuntime {
 				toolBatchTimer: undefined,
 				bridge,
 				toolFingerprint: piToolFingerprint(tools),
+				toolTracker: new AcpToolTracker(),
 				turnCompletion: undefined,
 				abortRequested: false,
 				piSessionId,
@@ -719,7 +723,18 @@ export class AntigravityRuntime {
 		for (const activity of mapSessionUpdate(notification)) {
 			if (activity.type === "text") binding.writer.text(activity.delta);
 			else if (activity.type === "thought") binding.writer.thinking(activity.delta);
-			else if (activity.type === "tool" || activity.type === "plan") binding.writer.thinking(activity.text);
+			else if (activity.type === "plan") binding.writer.thinking(activity.text);
+			else if (activity.type === "tool") {
+				const toolActivity: AcpToolActivity = {
+					sessionId: notification.sessionId,
+					...(binding.piSessionId ? { piSessionId: binding.piSessionId } : {}),
+					update: activity.update,
+					toolCall: binding.toolTracker.apply(activity.update),
+				};
+				// Native tools already ran remotely. Only display them; never emit executable Pi calls.
+				if (this.onToolActivity) this.onToolActivity(toolActivity);
+				else binding.writer.text(`\n${toolActivityDetails(toolActivity)}\n`);
+			}
 		}
 	}
 

@@ -11,6 +11,7 @@ A first-class [Pi](https://github.com/earendil-works/pi) provider for **Google A
 - Collapses Antigravity's effort-qualified IDs into one entry per model; Pi's Shift+Tab reasoning control selects low/medium/high dynamically.
 - Supports Pi streaming, cancellation, usage/quota metadata, lifecycle cleanup, and persisted ACP session restoration across Pi restarts.
 - Routes compatible Pi tools through an authenticated loopback MCP bridge.
+- Displays Antigravity-native tool activity separately from thinking, using Pi's built-in shell/file renderers, status bullets, output previews, and colored diffs. Updates for one invocation share a live row; expand with Pi's tool expansion shortcut (Ctrl+O by default) to see full output and ACP details. Every raw update is retained as display-only session data for JSON/RPC clients (`entry_appended`) and session restore. Native actions are not executed again by Pi.
 - Supports persisted `default`, `auto-edit`, and `yolo` Antigravity permission modes. The requested default is `yolo`; switching to a prompting mode retains the single-use, fail-closed Pi permission broker.
 - Advertises no ACP filesystem or terminal client capabilities.
 - Provides setup, auth-health, logout/account-switching, qualification, quota, and runtime-update commands.

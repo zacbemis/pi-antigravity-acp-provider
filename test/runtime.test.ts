@@ -1,4 +1,5 @@
 import type { Context, Model } from "@earendil-works/pi-ai";
+import type { AcpToolActivity } from "../src/acp/events.js";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -29,6 +30,28 @@ const model: Model<"antigravity-acp"> = {
 };
 
 describe("AntigravityRuntime", () => {
+	it("forwards full native tool activities without executable calls or thinking", async () => {
+		const activities: AcpToolActivity[] = [];
+		const runtime = new AntigravityRuntime(
+			(options) => new AntigravityAcpConnection({ ...options, command: process.execPath, args: [fakeAgent, "native-tools"] }),
+			"yolo", undefined, (activity) => activities.push(activity),
+		);
+		try {
+			const writer = runtime.stream(model, { systemPrompt: "Project rules", messages: [{ role: "user", content: "hello", timestamp: 1 }] }, {
+				sessionId: "native-session", apiKey: "test-key",
+			});
+			for await (const _event of writer.stream) void _event;
+			expect(activities).toHaveLength(2);
+			expect(activities[0]).toMatchObject({ piSessionId: "native-session", toolCall: { status: "in_progress", rawInput: { command: "echo hello" } } });
+			expect(activities[1]?.toolCall).toMatchObject({ title: "Run command", status: "completed", rawInput: { command: "echo hello" }, rawOutput: { exitCode: 0, stdout: "hello" }, locations: [{ path: "src/a.ts", line: 2 }] });
+			expect(JSON.stringify(activities[1])).toContain("output".repeat(1000));
+			expect(writer.message.content).toEqual([{ type: "thinking", thinking: "Checking" }, { type: "text", text: "Hello" }]);
+			expect(writer.message.stopReason).toBe("stop");
+		} finally {
+			await runtime.close();
+		}
+	});
+
 	it("recognizes Gemini CLI's advertised Google login method", async () => {
 		const runtime = new AntigravityRuntime(
 			(options) => new AntigravityAcpConnection({ ...options, command: process.execPath, args: [fakeAgent] }),

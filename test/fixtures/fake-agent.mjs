@@ -163,6 +163,12 @@ for await (const line of rl) {
 		send({ jsonrpc: "2.0", id, result: {} });
 	} else if (method === "session/prompt") {
 		const text = params.prompt.filter((block) => block.type === "text").map((block) => block.text).join("\n");
+		if (scenario === "native-tools") {
+			for (const update of [
+				{ sessionUpdate: "tool_call", toolCallId: "native-1", title: "Run command", kind: "execute", status: "in_progress", rawInput: { command: "echo hello" }, locations: [{ path: "src/a.ts", line: 2 }], _meta: { extra: "kept" } },
+				{ sessionUpdate: "tool_call_update", toolCallId: "native-1", status: "completed", rawOutput: { exitCode: 0, stdout: "hello" }, content: [{ type: "content", content: { type: "text", text: "output".repeat(1000) } }, { type: "diff", path: "src/a.ts", oldText: "old", newText: "new" }] },
+			]) send({ jsonrpc: "2.0", method: "session/update", params: { sessionId: params.sessionId, update } });
+		}
 		if (text.includes("bridge") && mcpServer) {
 			bridgePromptId = id;
 			const invocation = text.includes("parallel")
