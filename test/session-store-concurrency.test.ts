@@ -1,34 +1,28 @@
 import { spawn } from "node:child_process";
 import fs from "node:fs";
-import { createRequire } from "node:module";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import ts from "typescript";
+import { buildSync } from "esbuild";
 import { describe, expect, it } from "vitest";
 import { AcpSessionStore } from "../src/acp/session-store.js";
 import { withStoreLock } from "../src/acp/store-lock.js";
-
-const require = createRequire(import.meta.url);
 
 describe("cross-process session transactions", () => {
 	it("preserves concurrent saves and removals from independent Pi processes", async () => {
 		const dir = fs.mkdtempSync(path.join(os.tmpdir(), "acp-concurrent-"));
 		try {
-			// Compile just these modules for standalone child processes, avoiding
-			// Vitest's in-process module cache and any real provider/backend.
-			for (const item of [
-				{ name: "config", relPath: "../src/config.ts" },
-				{ name: "store-lock", relPath: "../src/acp/store-lock.ts" },
-				{ name: "session-store", relPath: "../src/acp/session-store.ts" },
-			]) {
-				const source = fs.readFileSync(fileURLToPath(new URL(item.relPath, import.meta.url)), "utf8");
-				const compiled = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, esModuleInterop: true } }).outputText
-					.replace('require("./store-lock.js")', 'require("./store-lock.cjs")')
-					.replace('require("../config.js")', 'require("./config.cjs")')
-					.replace('require("proper-lockfile")', `require(${JSON.stringify(require.resolve("proper-lockfile"))})`);
-				fs.writeFileSync(path.join(dir, `${item.name}.cjs`), compiled);
-			}
+			// Bundle the real implementation for independent workers. TypeScript 7
+			// no longer exposes transpileModule; avoid compiler internals and brittle
+			// import rewrites while keeping real cross-process lock contention.
+			buildSync({
+				entryPoints: [fileURLToPath(new URL("../src/acp/session-store.ts", import.meta.url))],
+				outfile: path.join(dir, "session-store.cjs"),
+				bundle: true,
+				platform: "node",
+				format: "cjs",
+				target: "node22",
+			});
 			const file = path.join(dir, "sessions.json");
 			const worker = `
 				const fs = require('node:fs');
