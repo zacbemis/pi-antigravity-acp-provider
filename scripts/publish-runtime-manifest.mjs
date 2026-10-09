@@ -38,7 +38,7 @@ git("push", "origin", branch);
 const url = gh("pr", "create", "--base", "main", "--head", branch, "--title", title, "--body",
 	publicationTest
 		? `Bot publication check: this changes only whitespace in the already-signed catalog. CI will be dispatched explicitly; after both checks pass the PR will ${mergePublicationTest ? "merge through normal branch protection" : "close without merging"}. The signed payload and approved releases are unchanged.`
-		: "Verified official Google artifacts and signed runtime catalog update. Explicit CI dispatch is required because GITHUB_TOKEN-created PRs do not trigger pull_request workflows. No branch-protection bypass is used.");
+		: "Verified official Google artifacts and signed runtime catalog update. Explicit CI dispatch is required because GITHUB_TOKEN-created PR workflows are held for approval. No branch-protection bypass is used.");
 if (!url.startsWith(`https://github.com/${repo}/pull/`)) throw new Error("Unexpected runtime pull request URL");
 console.log(url);
 
