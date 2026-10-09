@@ -29,6 +29,25 @@ const model: Model<"antigravity-acp"> = {
 };
 
 describe("AntigravityRuntime", () => {
+	it("discovers and runs models on a config-options-only ACP server", async () => {
+		const runtime = new AntigravityRuntime(
+			(options) => new AntigravityAcpConnection({ ...options, command: process.execPath, args: [fakeAgent, "config-options"] }),
+		);
+		try {
+			expect(await runtime.discoverModels("test-key")).toEqual([
+				{ modelId: "auto", name: "Auto" }, { modelId: "gemini-test", name: "Gemini Test" },
+			]);
+			const first = runtime.stream(model, { messages: [{ role: "user", content: "hello", timestamp: 1 }] }, { apiKey: "test-key", sessionId: "modern-session" });
+			for await (const _event of first.stream) void _event;
+			expect(first.message.stopReason).toBe("stop");
+			expect((await runtime.snapshot()).processes[0]?.modelId).toBe("gemini-test");
+			await runtime.setPermissionMode("default");
+			expect((await runtime.snapshot()).permissionMode).toBe("default");
+		} finally {
+			await runtime.close();
+		}
+	});
+
 	it("recognizes Gemini CLI's advertised Google login method", async () => {
 		const runtime = new AntigravityRuntime(
 			(options) => new AntigravityAcpConnection({ ...options, command: process.execPath, args: [fakeAgent] }),

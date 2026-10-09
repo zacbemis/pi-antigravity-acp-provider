@@ -1,4 +1,4 @@
-import type { ModelInfo } from "@agentclientprotocol/sdk";
+import type { AcpModelInfo } from "./acp/session-state.js";
 import type {
 	Model,
 	ThinkingLevel,
@@ -37,11 +37,11 @@ export const FALLBACK_MODELS: readonly Model<typeof API_ID>[] = [
 /** Collapse Antigravity's effort-qualified ACP IDs into one Pi model. The
  * exact server IDs live in thinkingLevelMap, allowing Shift+Tab to select the
  * corresponding low/medium/high variant without cluttering /model. */
-export function projectModels(models: readonly ModelInfo[]): Model<typeof API_ID>[] {
+export function projectModels(models: readonly AcpModelInfo[]): Model<typeof API_ID>[] {
 	const safe = models.filter((candidate) => validModelId(candidate.modelId.trim()));
 	const groups = new Map<
 		string,
-		{ name: string; variants: Variants; members: ModelInfo[] }
+		{ name: string; variants: Variants; members: AcpModelInfo[] }
 	>();
 
 	for (const candidate of safe) {

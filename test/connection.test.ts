@@ -3,6 +3,7 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it, vi } from "vitest";
 
 import { AntigravityAcpConnection } from "../src/acp/connection.js";
+import { sessionModels, sessionModes } from "../src/acp/session-state.js";
 
 const fakeAgent = fileURLToPath(new URL("./fixtures/fake-agent.mjs", import.meta.url));
 
@@ -101,6 +102,28 @@ describe("AntigravityAcpConnection", () => {
 			);
 			expect((error as Error).message).toContain("api_key=<redacted>");
 			expect((error as Error).message).not.toContain("AIza1234567890abcdefghijkl");
+		} finally {
+			await connection.close();
+		}
+	});
+
+	it("uses stable grouped config options for discovery, model/mode selection and restoration", async () => {
+		const connection = new AntigravityAcpConnection({
+			cwd: path.dirname(fakeAgent), command: process.execPath, args: [fakeAgent, "config-options"],
+		});
+		try {
+			const session = await connection.newSession(process.cwd());
+			expect(session.models).toBeUndefined();
+			expect(sessionModels(session)?.availableModels).toEqual([
+				{ modelId: "auto", name: "Auto" }, { modelId: "gemini-test", name: "Gemini Test" },
+			]);
+			await connection.setModel(session.sessionId, "gemini-test");
+			await connection.setMode(session.sessionId, "yolo");
+			const resumed = await connection.resumeSession(session.sessionId, process.cwd());
+			expect(sessionModels(resumed)?.currentModelId).toBe("gemini-test");
+			expect(sessionModes(resumed)?.currentModeId).toBe("yolo");
+			const loaded = await connection.loadSession(session.sessionId, process.cwd());
+			expect(sessionModels(loaded)?.currentModelId).toBe("gemini-test");
 		} finally {
 			await connection.close();
 		}
