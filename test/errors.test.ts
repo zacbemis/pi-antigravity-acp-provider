@@ -3,6 +3,12 @@ import { describe, expect, it } from "vitest";
 import { redact } from "../src/acp/errors.js";
 
 describe("diagnostic redaction", () => {
+	it("removes proxy URL credentials and Basic authorization values", () => {
+		const output = redact("HTTPS_PROXY=http://user:proxy-password@proxy.test:8080\nProxy-Authorization: Basic dXNlcjpwYXNzd29yZA==");
+		expect(output).toContain("http://<redacted>@proxy.test:8080");
+		expect(output).not.toContain("proxy-password");
+		expect(output).not.toContain("dXNlcjpwYXNzd29yZA==");
+	});
 	it("removes common API key, OAuth, header, and cookie secrets", () => {
 		const input = [
 			"AIza1234567890abcdef",

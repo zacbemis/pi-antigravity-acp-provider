@@ -129,6 +129,45 @@ describe("AntigravityAcpConnection", () => {
 		}
 	});
 
+	it.each(["stream progress", "native work"])("keeps an active %s turn alive beyond the idle budget", async (text) => {
+		const connection = new AntigravityAcpConnection({ cwd: process.cwd(), command: process.execPath,
+			args: [fakeAgent], env: { ...process.env, FAKE_PROGRESS_STEP_MS: "60" }, promptIdleTimeoutMs: 300, promptWorkIdleTimeoutMs: 1500 });
+		try {
+			const session = await connection.newSession(process.cwd());
+			expect((await connection.prompt({ sessionId: session.sessionId, prompt: [{ type: "text", text }] })).stopReason).toBe("end_turn");
+			expect(connection.process.alive).toBe(true);
+		} finally { await connection.close(); }
+	});
+
+	it("bounds native tools that never report completion", async () => {
+		const connection = new AntigravityAcpConnection({ cwd: process.cwd(), command: process.execPath,
+			args: [fakeAgent], promptIdleTimeoutMs: 300, promptWorkIdleTimeoutMs: 600 });
+		try {
+			const session = await connection.newSession(process.cwd());
+			await expect(connection.prompt({ sessionId: session.sessionId, prompt: [{ type: "text", text: "native stuck" }] })).rejects.toThrow("no tool/permission progress for 600ms");
+			await connection.process.exited;
+			expect(connection.process.alive).toBe(false);
+		} finally { await connection.close(); }
+	});
+
+	it("holds a parked Pi call until release, then detects a silent prompt", async () => {
+		const connection = new AntigravityAcpConnection({ cwd: process.cwd(), command: process.execPath,
+			args: [fakeAgent], promptIdleTimeoutMs: 100, promptWorkIdleTimeoutMs: 1000 });
+		try {
+			const session = await connection.newSession(process.cwd());
+			const pending = connection.prompt({ sessionId: session.sessionId, prompt: [{ type: "text", text: "hang" }] });
+			const rejection = expect(pending).rejects.toThrow("no progress for 100ms");
+			const release = connection.holdPromptWatchdog(session.sessionId);
+			await new Promise((resolve) => setTimeout(resolve, 250));
+			expect(connection.process.alive).toBe(true);
+			release(); release(); await rejection;
+		} finally { await connection.close(); }
+	});
+
+	it("rejects invalid inactivity options before starting a child", () => {
+		expect(() => new AntigravityAcpConnection({ cwd: process.cwd(), command: process.execPath, args: [fakeAgent], promptIdleTimeoutMs: Infinity })).toThrow(RangeError);
+	});
+
 	it("uses the official SDK against a real child process", async () => {
 		const updates: string[] = [];
 		const connection = new AntigravityAcpConnection({

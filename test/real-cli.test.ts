@@ -6,7 +6,7 @@ import { describe, expect, it } from "vitest";
 import { AntigravityAcpConnection } from "../src/acp/connection.js";
 import { HeadlessOAuthRelay } from "../src/acp/headless-oauth.js";
 import { resolveAntigravityAcpEntry } from "../src/acp/process.js";
-import { sessionModels } from "../src/acp/session-state.js";
+import { sessionModels, sessionModes } from "../src/acp/session-state.js";
 
 const enabled = process.env.PI_ANTIGRAVITY_ACP_REAL === "1";
 
@@ -27,7 +27,7 @@ describe.skipIf(!enabled)("Google Antigravity ACP contract", () => {
 		}
 	}, 60_000);
 
-	it("reads model configuration and selects the current model without sending a prompt", async () => {
+	it("reads model and permission settings and reselects current values without sending a prompt", async () => {
 		const connection = new AntigravityAcpConnection({ cwd: process.cwd(), initializeTimeoutMs: 45_000 });
 		try {
 			const session = await connection.newSession(process.cwd());
@@ -35,6 +35,11 @@ describe.skipIf(!enabled)("Google Antigravity ACP contract", () => {
 			expect(models?.availableModels.length).toBeGreaterThan(0);
 			if (!models) throw new Error("Official runtime did not advertise models");
 			await connection.setModel(session.sessionId, models.currentModelId);
+			const modes = sessionModes(session);
+			if (!modes) throw new Error("Official runtime did not advertise permission modes");
+			expect(modes.availableModes.map((mode) => mode.id)).toEqual(expect.arrayContaining(["default", "auto_edit", "yolo"]));
+			await connection.setMode(session.sessionId, modes.currentModeId);
+			expect(sessionModes(connection.getSessionState(session.sessionId))?.currentModeId).toBe(modes.currentModeId);
 		} finally {
 			await connection.close();
 		}

@@ -494,9 +494,14 @@ describe("AntigravityRuntime", () => {
 	});
 
 	it("cancels an ACP prompt while preserving a healthy warm binding", async () => {
-		const runtime = new AntigravityRuntime(
-			(options) => new AntigravityAcpConnection({ ...options, command: process.execPath, args: [fakeAgent] }),
-		);
+		let promptStarted!: () => void;
+		const prompting = new Promise<void>((resolve) => { promptStarted = resolve; });
+		const runtime = new AntigravityRuntime((options) => {
+			const connection = new AntigravityAcpConnection({ ...options, command: process.execPath, args: [fakeAgent] });
+			const prompt = connection.prompt.bind(connection);
+			connection.prompt = (...args) => { promptStarted(); return prompt(...args); };
+			return connection;
+		});
 		try {
 			const controller = new AbortController();
 			const writer = runtime.stream(
@@ -504,7 +509,7 @@ describe("AntigravityRuntime", () => {
 				{ messages: [{ role: "user", content: "hang", timestamp: 1 }] },
 				{ sessionId: "abort-session", apiKey: "test-key", signal: controller.signal },
 			);
-			await runtime.snapshot();
+			await prompting;
 			controller.abort();
 			const events = [];
 			for await (const event of writer.stream) events.push(event);
