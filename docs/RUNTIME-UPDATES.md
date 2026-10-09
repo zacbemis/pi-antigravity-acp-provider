@@ -34,7 +34,7 @@ If the registry is unavailable, a working managed runtime remains usable. A firs
 
 ## Publishing new runtime metadata
 
-The scheduled `update-runtime-manifest.yml` workflow checks the official registry daily. When it sees a new version, it downloads every platform archive, computes SHA-256 and decoded archive size, verifies the exact two-file layout, records member sizes, signs the updated catalog, tests signature verification, and commits only `runtime-manifest.json`.
+The scheduled `update-runtime-manifest.yml` workflow checks the official registry daily. When it sees a new version, it downloads every platform archive, computes SHA-256 and decoded archive size, verifies the exact two-file layout, records member sizes, signs the updated catalog, tests signature verification, and commits only `runtime-manifest.json` on a dedicated automation branch. It opens a PR, explicitly dispatches CI on that branch, and merges only after both supported Node checks pass on the exact PR head through normal main-branch protection. It never pushes directly to main or bypasses checks. See [MAINTENANCE.md](MAINTENANCE.md) for permissions and safe publication checks.
 
 The repository must define the Actions secret `ACP_RUNTIME_MANIFEST_PRIVATE_KEY` containing the Ed25519 private key corresponding to the public key in `src/acp/runtime-manifest.ts`. The private key must never be committed.
 
