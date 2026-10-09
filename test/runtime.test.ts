@@ -1,4 +1,4 @@
-import type { Context, Model } from "@earendil-works/pi-ai";
+import { normalizeContext, type Context, type Model } from "@earendil-works/pi-ai";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -136,6 +136,7 @@ describe("AntigravityRuntime", () => {
 			const second = runtime.stream(
 				switchedModel,
 				{
+					systemPrompt: "Be useful",
 					messages: [
 						...context.messages,
 						done.message,
@@ -222,6 +223,34 @@ describe("AntigravityRuntime", () => {
 			for await (const _event of second.stream) void _event;
 			const secondGeneration = (await runtime.snapshot()).processes[0]?.generation;
 			expect(secondGeneration).not.toBe(firstGeneration);
+		} finally {
+			await runtime.close();
+		}
+	});
+
+	it("recreates a warm session when transcript instructions change", async () => {
+		const runtime = new AntigravityRuntime(
+			(options) => new AntigravityAcpConnection({ ...options, command: process.execPath, args: [fakeAgent] }),
+		);
+		const firstContext = normalizeContext({
+			systemPrompt: "Original instructions",
+			messages: [{ role: "user", content: "hello", timestamp: 1 }],
+		});
+		try {
+			const first = runtime.stream(model, firstContext, { sessionId: "system-delta", apiKey: "test-key" });
+			for await (const _event of first.stream) void _event;
+			const generation = (await runtime.snapshot()).processes[0]?.generation;
+			const second = runtime.stream(model, normalizeContext({
+				messages: [
+					...firstContext.messages,
+					first.message,
+					{ role: "system", content: "Updated instructions", timestamp: 2 },
+					{ role: "user", content: "continue", timestamp: 3 },
+				],
+			}), { sessionId: "system-delta", apiKey: "test-key" });
+			for await (const _event of second.stream) void _event;
+			expect(second.message.stopReason).toBe("stop");
+			expect((await runtime.snapshot()).processes[0]?.generation).not.toBe(generation);
 		} finally {
 			await runtime.close();
 		}

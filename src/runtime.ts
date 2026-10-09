@@ -7,7 +7,16 @@ import type {
 	RequestPermissionResponse,
 	SessionNotification,
 } from "@agentclientprotocol/sdk";
-import type { Context, Model, SimpleStreamOptions, ToolResultMessage } from "@earendil-works/pi-ai";
+import {
+	collapseSystemMessages,
+	getCurrentSystemPrompt,
+	getCurrentTools,
+	normalizeContext,
+	type Context,
+	type Model,
+	type SimpleStreamOptions,
+	type ToolResultMessage,
+} from "@earendil-works/pi-ai";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { createHash } from "node:crypto";
 
@@ -149,7 +158,15 @@ export class AntigravityRuntime {
 
 	stream(model: AntigravityModel, context: Context, options: SimpleStreamOptions = {}): PiEventWriter {
 		const writer = new PiEventWriter(model);
-		void this.runQueued(model, context, options, writer).catch((error: unknown) => {
+		// ACP has no mid-conversation system-message API. Replay Pi's prompt/tool
+		// deltas into a checkpoint; its fingerprint invalidates stale warm sessions.
+		const transcript = collapseSystemMessages(normalizeContext(context));
+		const resolvedContext: Context = {
+			messages: transcript.messages,
+			systemPrompt: getCurrentSystemPrompt(transcript.messages),
+			tools: getCurrentTools(transcript.messages),
+		};
+		void this.runQueued(model, resolvedContext, options, writer).catch((error: unknown) => {
 			writer.fail(error, options.signal?.aborted === true || isAbort(error));
 		});
 		return writer;
@@ -841,6 +858,14 @@ function messageFingerprint(message: Context["messages"][number]): string {
 			provider: message.provider,
 			model: message.model,
 			content: message.content,
+		};
+	} else if (message.role === "system") {
+		value = {
+			role: message.role,
+			content: message.content,
+			sections: message.sections,
+			toolsAdded: message.toolsAdded,
+			toolsRemoved: message.toolsRemoved,
 		};
 	} else {
 		value = {

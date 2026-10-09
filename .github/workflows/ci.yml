@@ -32,5 +32,5 @@ jobs:
       - run: npm run check
       - run: npm run pack:check
       - run: npm run test:packed
-      - name: Audit runtime dependencies
-        run: npm audit --omit=dev --audit-level=moderate
+      - name: Audit dependencies (including development tools)
+        run: npm audit --audit-level=moderate

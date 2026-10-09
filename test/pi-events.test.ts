@@ -60,6 +60,25 @@ describe("PiEventWriter", () => {
 		expect(writer.message.stopReason).toBe("toolUse");
 	});
 
+	it("preserves nested JSON tool arguments", () => {
+		const writer = new PiEventWriter(model);
+		const args = { nested: [null, true, 4, { text: "value" }] };
+		writer.toolCall("call-json", "echo", args);
+		expect(writer.message.content[0]).toMatchObject({ arguments: args });
+	});
+
+	it.each([undefined, NaN, Infinity, 1n, () => true, new Date()])("rejects non-JSON tool input: %s", (value) => {
+		const writer = new PiEventWriter(model);
+		expect(() => writer.toolCall("call-invalid", "echo", { value })).toThrow("valid JSON object");
+		expect(writer.message.content).toHaveLength(0);
+	});
+
+	it("rejects cyclic tool input without overflowing the stack", () => {
+		const args: Record<string, unknown> = {};
+		args.self = args;
+		expect(() => new PiEventWriter(model).toolCall("call-cycle", "echo", args)).toThrow("valid JSON object");
+	});
+
 	it("terminates errors once", async () => {
 		const writer = new PiEventWriter(model);
 		writer.fail(new Error("failed"));
