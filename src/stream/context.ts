@@ -1,5 +1,5 @@
 import type { ContentBlock } from "@agentclientprotocol/sdk";
-import type { Context, Message } from "@earendil-works/pi-ai";
+import { getCurrentSystemPrompt, type Context, type Message } from "@earendil-works/pi-ai";
 
 import { AntigravityAcpError } from "../acp/errors.js";
 
@@ -70,8 +70,9 @@ export function buildPromptParts(
 
 function buildReconstruction(context: Context, historyEnd: number): string {
 	const sections: string[] = [];
-	if (context.systemPrompt?.trim()) {
-		sections.push(`# Pi session instructions\n\n${context.systemPrompt.trim()}`);
+	const systemPrompt = getCurrentSystemPrompt(context.messages) || context.systemPrompt;
+	if (systemPrompt?.trim()) {
+		sections.push(`# Pi session instructions\n\n${systemPrompt.trim()}`);
 	}
 
 	const history = context.messages.slice(0, historyEnd).map(formatMessage).filter(Boolean);
@@ -102,6 +103,9 @@ function findLatestUserIndex(messages: Message[]): number {
 }
 
 function formatMessage(message: Message): string {
+	// System state is rendered separately as instructions, never as a tool result
+	// or as untrusted conversation history.
+	if (message.role === "system") return "";
 	if (message.role === "user") return `## User\n${contentText(message.content)}`;
 	if (message.role === "assistant") {
 		const content = message.content

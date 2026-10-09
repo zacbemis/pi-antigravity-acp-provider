@@ -8,7 +8,8 @@ import {
 	type ToolCall,
 } from "@earendil-works/pi-ai";
 
-import { errorMessage } from "../acp/errors.js";
+import { AntigravityAcpError, errorMessage } from "../acp/errors.js";
+import { isJsonObject } from "./json.js";
 import { emptyUsage } from "./usage.js";
 
 export class PiEventWriter {
@@ -56,6 +57,9 @@ export class PiEventWriter {
 
 	toolCall(id: string, name: string, args: Record<string, unknown>): void {
 		if (this.terminal) return;
+		if (!isJsonObject(args)) {
+			throw new AntigravityAcpError("invalid_input", "Pi tool arguments must be a valid JSON object");
+		}
 		this.ensureStarted();
 		this.closeOpen();
 		const toolCall: ToolCall = { type: "toolCall", id, name, arguments: args };
