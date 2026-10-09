@@ -66,10 +66,11 @@
     "access": "public"
   },
   "dependencies": {
-    "@agentclientprotocol/sdk": "0.19.1",
+    "@agentclientprotocol/sdk": "1.8.0",
     "@modelcontextprotocol/sdk": "1.32.1",
     "proper-lockfile": "4.1.2",
-    "unzipper": "0.12.5"
+    "unzipper": "0.12.5",
+    "zod": "4.6.5"
   },
   "devDependencies": {
     "@earendil-works/pi-ai": "1.1.0",

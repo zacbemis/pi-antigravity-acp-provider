@@ -6,6 +6,7 @@ import { describe, expect, it } from "vitest";
 import { AntigravityAcpConnection } from "../src/acp/connection.js";
 import { HeadlessOAuthRelay } from "../src/acp/headless-oauth.js";
 import { resolveAntigravityAcpEntry } from "../src/acp/process.js";
+import { sessionModels } from "../src/acp/session-state.js";
 
 const enabled = process.env.PI_ANTIGRAVITY_ACP_REAL === "1";
 
@@ -25,6 +26,19 @@ describe.skipIf(!enabled)("Google Antigravity ACP contract", () => {
 			await connection.close();
 		}
 	}, 60_000);
+
+	it("reads model configuration and selects the current model without sending a prompt", async () => {
+		const connection = new AntigravityAcpConnection({ cwd: process.cwd(), initializeTimeoutMs: 45_000 });
+		try {
+			const session = await connection.newSession(process.cwd());
+			const models = sessionModels(session);
+			expect(models?.availableModels.length).toBeGreaterThan(0);
+			if (!models) throw new Error("Official runtime did not advertise models");
+			await connection.setModel(session.sessionId, models.currentModelId);
+		} finally {
+			await connection.close();
+		}
+	}, 150_000);
 
 	it.skipIf(process.platform === "win32")("captures the real headless OAuth authorization URL", async () => {
 		const home = fs.mkdtempSync(path.join(os.tmpdir(), "antigravity-headless-contract-"));

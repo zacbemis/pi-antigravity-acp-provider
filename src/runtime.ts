@@ -1,8 +1,6 @@
 import type {
 	ContentBlock,
 	InitializeResponse,
-	ModelInfo,
-	NewSessionResponse,
 	RequestPermissionRequest,
 	RequestPermissionResponse,
 	SessionNotification,
@@ -28,6 +26,7 @@ import {
 import { AntigravityAcpConnection, type AntigravityConnectionOptions } from "./acp/connection.js";
 import { abortError, AntigravityAcpError, errorMessage } from "./acp/errors.js";
 import { AcpSessionStore } from "./acp/session-store.js";
+import { sessionModels, sessionModes, type AcpModelInfo, type AcpNewSessionResponse } from "./acp/session-state.js";
 import {
 	MANAGED_AUTH_MARKER,
 	PERMISSION_RESULT_KIND,
@@ -73,7 +72,7 @@ interface Binding {
 	cwd: string;
 	connection: AntigravityAcpConnection;
 	initialize: InitializeResponse;
-	session: NewSessionResponse;
+	session: AcpNewSessionResponse;
 	modelId: string;
 	messageCount: number;
 	historyFingerprint: string;
@@ -172,7 +171,7 @@ export class AntigravityRuntime {
 		return writer;
 	}
 
-	async discoverModels(apiKey: string | undefined, signal?: AbortSignal): Promise<ModelInfo[]> {
+	async discoverModels(apiKey: string | undefined, signal?: AbortSignal): Promise<AcpModelInfo[]> {
 		this.assertActive();
 		if (signal?.aborted) throw abortError();
 		if (this.ensureAgent) await ensureAntigravityAcpReady();
@@ -182,7 +181,7 @@ export class AntigravityRuntime {
 			const initialize = await connection.initialize(signal);
 			await authenticateForCredential(connection, initialize, apiKey, signal);
 			const session = await connection.newSession(process.cwd(), signal);
-			return session.models?.availableModels ?? [];
+			return sessionModels(session)?.availableModels ?? [];
 		} finally {
 			await connection.close();
 		}
@@ -599,7 +598,7 @@ export class AntigravityRuntime {
 			const mcpServers = mcpServer ? [mcpServer] : [];
 			const piSessionId = key.startsWith("sid:") ? key.slice(4) : undefined;
 			const saved = piSessionId ? this.sessionStore?.get(piSessionId) : undefined;
-			let session: NewSessionResponse | undefined;
+			let session: AcpNewSessionResponse | undefined;
 			let restored = false;
 			if (saved?.cwd === cwd) {
 				if (initialize.agentCapabilities?.sessionCapabilities?.resume) {
@@ -622,10 +621,10 @@ export class AntigravityRuntime {
 				}
 			}
 			session ??= await connection.newSession(cwd, signal, mcpServers);
-			if (supportsMode(session, this.permissionMode) && session.modes?.currentModeId !== this.permissionMode) {
+			if (supportsMode(session, this.permissionMode) && sessionModes(session)?.currentModeId !== this.permissionMode) {
 				await connection.setMode(session.sessionId, this.permissionMode, signal);
 			}
-			const currentModel = session.models?.currentModelId;
+			const currentModel = sessionModels(session)?.currentModelId;
 			if (currentModel !== acpModelId) await connection.setModel(session.sessionId, acpModelId, signal);
 			const createdBinding: Binding = {
 				key,
@@ -790,8 +789,8 @@ function hasUsableLocalAuth(health: AntigravityAuthHealth): boolean {
 	return health.status === "api-key-env" || health.status === "oauth-refreshable";
 }
 
-function supportsMode(session: NewSessionResponse, mode: PermissionMode): boolean {
-	return session.modes?.availableModes.some((candidate) => candidate.id === mode) === true;
+function supportsMode(session: AcpNewSessionResponse, mode: PermissionMode): boolean {
+	return sessionModes(session)?.availableModes.some((candidate) => candidate.id === mode) === true;
 }
 
 function permissionView(permission: PendingPermission): PermissionView {

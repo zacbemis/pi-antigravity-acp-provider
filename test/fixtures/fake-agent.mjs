@@ -120,7 +120,7 @@ for await (const line of rl) {
 		send({
 			jsonrpc: "2.0",
 			id,
-			result: {
+			result: scenario === "config-options" ? { sessionId: "fake-session", configOptions: sessionConfigOptions() } : {
 				sessionId: "fake-session",
 				modes: {
 					currentModeId: mode,
@@ -143,7 +143,7 @@ for await (const line of rl) {
 		send({
 			jsonrpc: "2.0",
 			id,
-			result: {
+			result: scenario === "config-options" ? { configOptions: sessionConfigOptions() } : {
 				modes: {
 					currentModeId: mode,
 					availableModes: [
@@ -155,6 +155,16 @@ for await (const line of rl) {
 				models: { currentModelId: model, availableModels: [] },
 			},
 		});
+	} else if (method === "session/set_config_option") {
+		if (params.configId === "model-selector") model = params.value;
+		else if (params.configId === "permission-selector") mode = params.value;
+		else {
+			send({ jsonrpc: "2.0", id, error: { code: -32602, message: "Unknown selector" } });
+			continue;
+		}
+		send({ jsonrpc: "2.0", id, result: { configOptions: sessionConfigOptions() } });
+	} else if (scenario === "config-options" && (method === "session/set_model" || method === "session/set_mode")) {
+		send({ jsonrpc: "2.0", id, error: { code: -32601, message: "Use config options" } });
 	} else if (method === "session/set_model") {
 		model = params.modelId;
 		send({ jsonrpc: "2.0", id, result: {} });
@@ -239,6 +249,17 @@ for await (const line of rl) {
 	} else {
 		send({ jsonrpc: "2.0", id, error: { code: -32601, message: `Unknown method ${method}` } });
 	}
+}
+
+function sessionConfigOptions() {
+	return [
+		{ id: "model-selector", name: "Model", category: "model", type: "select", currentValue: model,
+			options: [{ group: "google", name: "Google", options: [
+				{ value: "auto", name: "Auto" }, { value: "gemini-test", name: "Gemini Test" },
+			] }] },
+		{ id: "permission-selector", name: "Permissions", category: "mode", type: "select", currentValue: mode,
+			options: ["default", "auto_edit", "yolo"].map((value) => ({ value, name: value })) },
+	];
 }
 
 async function invokeMcpTool(server, text) {

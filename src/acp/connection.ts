@@ -4,10 +4,7 @@ import {
 	RequestError,
 	type AuthenticateRequest,
 	type InitializeResponse,
-	type LoadSessionResponse,
 	type McpServer,
-	type NewSessionResponse,
-	type ResumeSessionResponse,
 	type PromptRequest,
 	type PromptResponse,
 	type RequestPermissionRequest,
@@ -19,6 +16,12 @@ import { PACKAGE_VERSION } from "../constants.js";
 import { boundedNdjsonStream } from "./bounded-stream.js";
 import { abortError, AntigravityAcpError, redact } from "./errors.js";
 import { AntigravityProcess, type AntigravityProcessOptions } from "./process.js";
+import {
+	decodeSessionState,
+	findSessionSelector,
+	type AcpNewSessionResponse,
+	type SessionState,
+} from "./session-state.js";
 
 const DEFAULT_OPERATION_TIMEOUT_MS = 120_000;
 
@@ -41,6 +44,7 @@ export class AntigravityAcpConnection {
 	private readonly operationTimeoutMs: number;
 	private readonly protocolFailure: Promise<never>;
 	private readonly processFailure: Promise<never>;
+	private readonly sessions = new Map<string, SessionState>();
 	private handlers: AntigravityConnectionHandlers;
 	private closePromise?: Promise<void>;
 
@@ -80,6 +84,9 @@ export class AntigravityAcpConnection {
 				requestPermission: async (request) =>
 					this.handlers.onPermission?.(request) ?? { outcome: { outcome: "cancelled" } },
 				sessionUpdate: async (notification) => {
+					if (notification.update.sessionUpdate === "config_option_update") {
+						this.updateSessionState(notification.sessionId, notification.update);
+					}
 					await this.handlers.onUpdate?.(notification);
 				},
 			}),
@@ -137,9 +144,9 @@ export class AntigravityAcpConnection {
 		cwd: string,
 		signal?: AbortSignal,
 		mcpServers: McpServer[] = [],
-	): Promise<NewSessionResponse> {
+	): Promise<AcpNewSessionResponse> {
 		await this.initialize();
-		return this.withAbort(
+		const response = await this.withAbort(
 			this.withDeadline(
 				this.connection.newSession({ cwd, mcpServers }),
 				this.operationTimeoutMs,
@@ -147,6 +154,12 @@ export class AntigravityAcpConnection {
 			),
 			signal,
 		);
+		if (typeof response?.sessionId !== "string" || !response.sessionId) {
+			throw new AntigravityAcpError("protocol", "Invalid ACP new-session response");
+		}
+		const session = { ...response, ...decodeSessionState(response) };
+		this.sessions.set(session.sessionId, session);
+		return session;
 	}
 
 	async loadSession(
@@ -154,9 +167,9 @@ export class AntigravityAcpConnection {
 		cwd: string,
 		mcpServers: McpServer[] = [],
 		signal?: AbortSignal,
-	): Promise<LoadSessionResponse> {
+	): Promise<SessionState> {
 		await this.initialize();
-		return this.withAbort(
+		const response = await this.withAbort(
 			this.withDeadline(
 				this.connection.loadSession({ sessionId, cwd, mcpServers }),
 				this.operationTimeoutMs,
@@ -164,6 +177,7 @@ export class AntigravityAcpConnection {
 			),
 			signal,
 		);
+		return this.updateSessionState(sessionId, response);
 	}
 
 	async resumeSession(
@@ -171,22 +185,27 @@ export class AntigravityAcpConnection {
 		cwd: string,
 		mcpServers: McpServer[] = [],
 		signal?: AbortSignal,
-	): Promise<ResumeSessionResponse> {
+	): Promise<SessionState> {
 		await this.initialize();
-		return this.withAbort(
+		const response = await this.withAbort(
 			this.withDeadline(
-				this.connection.unstable_resumeSession({ sessionId, cwd, mcpServers }),
+				this.connection.resumeSession({ sessionId, cwd, mcpServers }),
 				this.operationTimeoutMs,
 				"session/resume",
 			),
 			signal,
 		);
+		return this.updateSessionState(sessionId, response);
 	}
 
 	async setModel(sessionId: string, modelId: string, signal?: AbortSignal): Promise<void> {
+		await this.initialize(signal);
+		if (await this.setSelector(sessionId, "model", modelId, signal)) return;
+		// Older official Antigravity builds still implement this removed draft
+		// method. Use the SDK's supported generic request API, not private internals.
 		await this.withAbort(
 			this.withDeadline(
-				this.connection.unstable_setSessionModel({ sessionId, modelId }),
+				this.connection.request("session/set_model", { sessionId, modelId }),
 				this.operationTimeoutMs,
 				"session/set_model",
 			),
@@ -195,6 +214,8 @@ export class AntigravityAcpConnection {
 	}
 
 	async setMode(sessionId: string, modeId: string, signal?: AbortSignal): Promise<void> {
+		await this.initialize(signal);
+		if (await this.setSelector(sessionId, "mode", modeId, signal)) return;
 		await this.withAbort(
 			this.withDeadline(
 				this.connection.setSessionMode({ sessionId, modeId }),
@@ -247,6 +268,32 @@ export class AntigravityAcpConnection {
 	async close(): Promise<void> {
 		this.closePromise ??= this.process.close();
 		await this.closePromise;
+	}
+
+	private updateSessionState(sessionId: string, response: unknown): SessionState {
+		const state = { ...this.sessions.get(sessionId), ...decodeSessionState(response) };
+		this.sessions.set(sessionId, state);
+		return state;
+	}
+
+	private async setSelector(
+		sessionId: string,
+		category: "model" | "mode",
+		value: string,
+		signal?: AbortSignal,
+	): Promise<boolean> {
+		const selector = findSessionSelector(this.sessions.get(sessionId) ?? {}, category);
+		if (!selector) return false;
+		const response = await this.withAbort(
+			this.withDeadline(
+				this.connection.setSessionConfigOption({ sessionId, configId: selector.id, value }),
+				this.operationTimeoutMs,
+				"session/set_config_option",
+			),
+			signal,
+		);
+		this.updateSessionState(sessionId, response);
+		return true;
 	}
 
 	private async withAbort<T>(promise: Promise<T>, signal?: AbortSignal): Promise<T> {

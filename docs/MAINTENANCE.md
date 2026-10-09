@@ -4,7 +4,7 @@
 
 - Pi 1.1.x; both Pi development packages are pinned together to 1.1.0.
 - Node.js 22.19.0 and 24 are checked in CI. Node declarations track the 24.x line.
-- ACP SDK 0.19.1 / protocol 1. Do not treat the SDK 1.x update as a routine patch.
+- ACP SDK 1.8.0 / stable protocol 1 (not experimental ACP v2). Both stable configuration selectors and older official Antigravity model APIs are supported and validated.
 - Host-provided Pi packages remain wildcard peers and are not bundled, following Pi's package contract. The README's compatibility statement defines tested support.
 
 ## Dependency updates
@@ -13,7 +13,7 @@ Dependabot runs weekly for npm and GitHub Actions. Pi updates are grouped to avo
 
 Before merging, require the Node 22.19.0 and 24 checks: typecheck, tests, pack dry run, an isolated packed-install smoke test, and full `npm audit --audit-level=moderate`. Audit findings describe dependency advisories, not proof that the provider exposes every affected code path. Do not use `npm audit fix --force` as a substitute for compatibility work.
 
-TypeScript 7 is deferred: it removes `transpileModule`, `ModuleKind`, and `ScriptTarget` used by the multiprocess session-store test harness. Migrate that harness before upgrading the compiler. Node 26 declarations are intentionally excluded until that runtime is supported.
+TypeScript 7.0.2 is supported. The multiprocess session-store tests bundle the actual implementation with explicitly declared esbuild, avoiding removed compiler APIs while retaining independent process lock contention. Node 26 declarations are intentionally excluded until that runtime is supported.
 
 ## Profiles
 
