@@ -37,14 +37,26 @@ export interface PiMcpBridgeOptions {
 	onCall: (invocation: PiToolInvocation) => Promise<CallToolResult>;
 }
 
+export interface ToolOmission {
+	name: string;
+	reason: string;
+}
+
 export function piToolFingerprint(tools: readonly Tool[]): string {
-	const projected = projectTools(tools, []);
-	return JSON.stringify(projected.map((tool) => [tool.mcpName, tool.inputSchema]));
+	const omissions: ToolOmission[] = [];
+	const projected = projectTools(tools, omissions);
+	return JSON.stringify([projected.map((tool) => [tool.mcpName, tool.description, tool.inputSchema]), omissions]);
+}
+
+export function planToolProjection(tools: readonly Tool[]): ToolOmission[] {
+	const omissions: ToolOmission[] = [];
+	projectTools(tools, omissions);
+	return omissions;
 }
 
 export class PiMcpBridge {
 	readonly fingerprint: string;
-	readonly omissions: string[] = [];
+	readonly omissions: ToolOmission[] = [];
 	private readonly token = crypto.randomUUID().replaceAll("-", "");
 	private readonly tools: BridgeTool[];
 	private server: ReturnType<typeof createServer> | undefined;
@@ -52,7 +64,7 @@ export class PiMcpBridge {
 
 	constructor(private readonly options: PiMcpBridgeOptions) {
 		this.tools = projectTools(options.tools, this.omissions);
-		this.fingerprint = JSON.stringify(this.tools.map((tool) => [tool.mcpName, tool.inputSchema]));
+		this.fingerprint = piToolFingerprint(options.tools);
 	}
 
 	get empty(): boolean {
@@ -146,18 +158,18 @@ export class PiMcpBridge {
 	}
 }
 
-function projectTools(tools: readonly Tool[], omissions: string[]): BridgeTool[] {
+function projectTools(tools: readonly Tool[], omissions: ToolOmission[]): BridgeTool[] {
 	const output: BridgeTool[] = [];
 	const names = new Set<string>();
 	for (const tool of tools) {
-		if (output.length >= MAX_TOOLS) {
-			omissions.push(`Tool limit ${MAX_TOOLS} reached`);
-			break;
-		}
 		if (tool.name === PERMISSION_TOOL_NAME) continue;
+		if (output.length >= MAX_TOOLS) {
+			omissions.push({ name: tool.name, reason: `Tool limit ${MAX_TOOLS} reached` });
+			continue;
+		}
 		const mcpName = `pi_${tool.name}`.replace(/[^a-zA-Z0-9_-]/gu, "_").slice(0, 64);
 		if (!mcpName || names.has(mcpName)) {
-			omissions.push(`${tool.name}: duplicate or invalid projected name`);
+			omissions.push({ name: tool.name, reason: "duplicate or invalid projected name" });
 			continue;
 		}
 		const inputSchema = sanitizeSchema(tool.parameters);
@@ -166,7 +178,7 @@ function projectTools(tools: readonly Tool[], omissions: string[]): BridgeTool[]
 			inputSchema.type !== "object" ||
 			JSON.stringify(inputSchema).length > SCHEMA_LIMIT
 		) {
-			omissions.push(`${tool.name}: schema must be a supported, bounded object`);
+			omissions.push({ name: tool.name, reason: "schema must be a supported, bounded object" });
 			continue;
 		}
 		names.add(mcpName);

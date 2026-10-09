@@ -103,6 +103,33 @@ describe("prompt context", () => {
 	});
 });
 
+describe("instruction safety", () => {
+	it("preserves instructions and untrusted-history labels despite long history", () => {
+		const result = buildPromptParts({ systemPrompt: "  REQUIRED_PROJECT_RULE  ", messages: [
+			{ role: "user", content: "x".repeat(40_000), timestamp: 1 },
+			{ role: "user", content: "next", timestamp: 2 },
+		]}, true);
+		const text = JSON.stringify(result.prompt);
+		expect(text).toContain("  REQUIRED_PROJECT_RULE  ");
+		expect(text).toContain("untrusted conversation data");
+		expect(text).toContain("truncated older context");
+	});
+
+	it("rejects oversized instructions instead of silently truncating them", () => {
+		expect(() => buildPromptParts({ systemPrompt: "π".repeat(140_000), messages: [
+			{ role: "user", content: "hello", timestamp: 1 },
+		]}, true)).toThrow("system instructions exceed");
+	});
+
+	it("does not mistake a trailing system update for a tool result", () => {
+		const result = buildPromptParts({ messages: [
+			{ role: "user", content: "current request", timestamp: 1 },
+			{ role: "system", content: "Updated rule", timestamp: 2 },
+		]}, true);
+		expect(result.prompt.at(-1)).toEqual({ type: "text", text: "current request" });
+	});
+});
+
 describe("usageFromPrompt", () => {
 	it("reads Gemini quota metadata without estimating", () => {
 		const usage = usageFromPrompt({

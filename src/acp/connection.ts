@@ -16,6 +16,7 @@ import { PACKAGE_VERSION } from "../constants.js";
 import { boundedNdjsonStream } from "./bounded-stream.js";
 import { abortError, AntigravityAcpError, redact } from "./errors.js";
 import { AntigravityProcess, type AntigravityProcessOptions } from "./process.js";
+import { PromptWatchdog } from "./prompt-watchdog.js";
 import {
 	decodeSessionState,
 	findSessionSelector,
@@ -34,6 +35,10 @@ export interface AntigravityConnectionOptions extends AntigravityProcessOptions 
 	handlers?: AntigravityConnectionHandlers;
 	initializeTimeoutMs?: number;
 	operationTimeoutMs?: number;
+	/** No inbound progress while the model is idle (default 10 minutes). */
+	promptIdleTimeoutMs?: number;
+	/** No inbound progress while a tool/permission is outstanding (default 60 minutes). */
+	promptWorkIdleTimeoutMs?: number;
 	maxFrameBytes?: number;
 }
 
@@ -42,6 +47,9 @@ export class AntigravityAcpConnection {
 	readonly initialized: Promise<InitializeResponse>;
 	private readonly connection: ClientSideConnection;
 	private readonly operationTimeoutMs: number;
+	private readonly promptIdleTimeoutMs: number;
+	private readonly promptWorkIdleTimeoutMs: number;
+	private readonly watchdogs = new Map<string, PromptWatchdog>();
 	private readonly protocolFailure: Promise<never>;
 	private readonly processFailure: Promise<never>;
 	private readonly sessions = new Map<string, SessionState>();
@@ -51,6 +59,10 @@ export class AntigravityAcpConnection {
 	constructor(options: AntigravityConnectionOptions) {
 		this.handlers = options.handlers ?? {};
 		this.operationTimeoutMs = options.operationTimeoutMs ?? DEFAULT_OPERATION_TIMEOUT_MS;
+		this.promptIdleTimeoutMs = options.promptIdleTimeoutMs ?? 10 * 60_000;
+		this.promptWorkIdleTimeoutMs = options.promptWorkIdleTimeoutMs ?? 60 * 60_000;
+		// Validate before spawning a process, including programmatic timeout overrides.
+		new PromptWatchdog(this.promptIdleTimeoutMs, this.promptWorkIdleTimeoutMs, () => undefined).dispose();
 		this.process = new AntigravityProcess(options);
 		let rejectProtocolFailure!: (error: Error) => void;
 		this.protocolFailure = new Promise<never>((_resolve, reject) => {
@@ -81,11 +93,23 @@ export class AntigravityAcpConnection {
 		});
 		this.connection = new ClientSideConnection(
 			() => ({
-				requestPermission: async (request) =>
-					this.handlers.onPermission?.(request) ?? { outcome: { outcome: "cancelled" } },
+				requestPermission: async (request) => {
+					const release = this.watchdogs.get(request.sessionId)?.beginPermission();
+					try {
+						return (await this.handlers.onPermission?.(request)) ?? { outcome: { outcome: "cancelled" } };
+					} finally {
+						release?.();
+					}
+				},
 				sessionUpdate: async (notification) => {
+					this.watchdogs.get(notification.sessionId)?.noteUpdate(notification);
 					if (notification.update.sessionUpdate === "config_option_update") {
 						this.updateSessionState(notification.sessionId, notification.update);
+					} else if (notification.update.sessionUpdate === "current_mode_update") {
+						const state = this.getSessionState(notification.sessionId);
+						if (state.modes) this.sessions.set(notification.sessionId, {
+							...state, modes: { ...state.modes, currentModeId: notification.update.currentModeId },
+						});
 					}
 					await this.handlers.onUpdate?.(notification);
 				},
@@ -224,12 +248,23 @@ export class AntigravityAcpConnection {
 			),
 			signal,
 		);
+		const state = this.getSessionState(sessionId);
+		if (state.modes) this.sessions.set(sessionId, { ...state, modes: { ...state.modes, currentModeId: modeId } });
+	}
+
+	getSessionState(sessionId: string): SessionState {
+		return this.sessions.get(sessionId) ?? {};
+	}
+
+	/** A parked Pi tool gets the bounded work-inactivity window, not an absolute deadline. */
+	holdPromptWatchdog(sessionId: string): () => void {
+		return this.watchdogs.get(sessionId)?.hold() ?? (() => undefined);
 	}
 
 	async prompt(request: PromptRequest, signal?: AbortSignal): Promise<PromptResponse> {
 		if (signal?.aborted) throw abortError();
-		const pending = this.connection.prompt(request);
-		if (!signal) return this.withDeadline(pending, 10 * 60_000, "session/prompt");
+		const pending = this.withProgressWatchdog(request);
+		if (!signal) return pending;
 
 		return new Promise<PromptResponse>((resolve, reject) => {
 			let settled = false;
@@ -251,7 +286,8 @@ export class AntigravityAcpConnection {
 				}, 1_500);
 			};
 			signal.addEventListener("abort", onAbort, { once: true });
-			this.withDeadline(pending, 10 * 60_000, "session/prompt").then(
+			if (signal.aborted) onAbort();
+			pending.then(
 				(value) => {
 					if (aborting) finish(() => reject(abortError()));
 					else finish(() => resolve(value));
@@ -292,7 +328,10 @@ export class AntigravityAcpConnection {
 			),
 			signal,
 		);
-		this.updateSessionState(sessionId, response);
+		const state = this.updateSessionState(sessionId, response);
+		if (findSessionSelector(state, category)?.currentValue !== value) {
+			throw new AntigravityAcpError("protocol", `Antigravity did not confirm the requested ${category} selection`);
+		}
 		return true;
 	}
 
@@ -322,6 +361,30 @@ export class AntigravityAcpConnection {
 				},
 			);
 		});
+	}
+
+	private async withProgressWatchdog(request: PromptRequest): Promise<PromptResponse> {
+		if (this.watchdogs.has(request.sessionId)) {
+			throw new AntigravityAcpError("invalid_input", "An ACP prompt is already running for this session");
+		}
+		let rejectStall!: (error: Error) => void;
+		const stalled = new Promise<never>((_resolve, reject) => { rejectStall = reject; });
+		const watchdog = new PromptWatchdog(this.promptIdleTimeoutMs, this.promptWorkIdleTimeoutMs, (busy, ms) => {
+			rejectStall(new AntigravityAcpError("timeout",
+				`Antigravity ACP session/prompt timed out: no ${busy ? "tool/permission " : ""}progress for ${ms}ms`));
+			void this.close().catch(() => undefined);
+		});
+		this.watchdogs.set(request.sessionId, watchdog);
+		watchdog.arm();
+		try {
+			return await Promise.race([
+				this.connection.prompt(request).catch((error: unknown) => { throw classifyError(error); }),
+				this.protocolFailure, this.processFailure, stalled,
+			]);
+		} finally {
+			watchdog.dispose();
+			this.watchdogs.delete(request.sessionId);
+		}
 	}
 
 	private async withDeadline<T>(promise: Promise<T>, timeoutMs: number, phase: string): Promise<T> {

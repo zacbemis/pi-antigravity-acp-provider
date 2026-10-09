@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import fs from "node:fs";
 import http from "node:http";
 import readline from "node:readline";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
@@ -6,6 +7,7 @@ import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/
 
 const rl = readline.createInterface({ input: process.stdin, crlfDelay: Infinity });
 const scenario = process.argv[2];
+const modern = scenario?.startsWith("config-options");
 const send = (value) => process.stdout.write(`${JSON.stringify(value)}\n`);
 let model = "auto";
 let mode = "default";
@@ -22,6 +24,10 @@ for await (const line of rl) {
 			send({ jsonrpc: "2.0", id: hangingPromptId, result: { stopReason: "cancelled" } });
 			hangingPromptId = undefined;
 		}
+		if (message.method === "session/cancel" && permissionPromptId !== undefined) {
+			send({ jsonrpc: "2.0", id: permissionPromptId, result: { stopReason: "cancelled" } });
+			permissionPromptId = undefined;
+		}
 		if (message.method === "session/cancel" && bridgePromptId !== undefined) {
 			send({ jsonrpc: "2.0", id: bridgePromptId, result: { stopReason: "cancelled" } });
 			bridgePromptId = undefined;
@@ -29,7 +35,10 @@ for await (const line of rl) {
 		continue;
 	}
 	const { id, method, params } = message;
-	if (id === "permission-1" && method === undefined && permissionPromptId !== undefined) {
+	if (process.env.FAKE_AGENT_LOG_FILE && method) fs.appendFileSync(process.env.FAKE_AGENT_LOG_FILE,
+		JSON.stringify({ method, ...(method === "session/prompt" ? { prompt: params.prompt, mode } : {}), ...(method === "session/set_mode" ? { modeId: params.modeId } : {}) }) + "\n");
+	if (id === "permission-1" && method === undefined) {
+		if (permissionPromptId === undefined) continue;
 		const decision = message.result?.outcome?.outcome ?? "cancelled";
 		send({
 			jsonrpc: "2.0",
@@ -63,7 +72,7 @@ for await (const line of rl) {
 				agentCapabilities: {
 					loadSession: true,
 					promptCapabilities: { image: true, embeddedContext: true },
-					mcpCapabilities: { http: true },
+					mcpCapabilities: { http: scenario !== "no-mcp" },
 					sessionCapabilities: { resume: {} },
 				},
 			},
@@ -120,16 +129,9 @@ for await (const line of rl) {
 		send({
 			jsonrpc: "2.0",
 			id,
-			result: scenario === "config-options" ? { sessionId: "fake-session", configOptions: sessionConfigOptions() } : {
+			result: modern ? { sessionId: "fake-session", configOptions: sessionConfigOptions() } : {
 				sessionId: "fake-session",
-				modes: {
-					currentModeId: mode,
-					availableModes: [
-						{ id: "default", name: "Default" },
-						{ id: "auto_edit", name: "Auto Edit" },
-						{ id: "yolo", name: "YOLO" },
-					],
-				},
+				modes: sessionModes(),
 				models: {
 					currentModelId: model,
 					availableModels: [
@@ -143,36 +145,59 @@ for await (const line of rl) {
 		send({
 			jsonrpc: "2.0",
 			id,
-			result: scenario === "config-options" ? { configOptions: sessionConfigOptions() } : {
-				modes: {
-					currentModeId: mode,
-					availableModes: [
-						{ id: "default", name: "Default" },
-						{ id: "auto_edit", name: "Auto Edit" },
-						{ id: "yolo", name: "YOLO" },
-					],
-				},
+			result: modern ? { configOptions: sessionConfigOptions() } : {
+				modes: sessionModes(true),
 				models: { currentModelId: model, availableModels: [] },
 			},
 		});
 	} else if (method === "session/set_config_option") {
 		if (params.configId === "model-selector") model = params.value;
-		else if (params.configId === "permission-selector") mode = params.value;
+		else if (params.configId === "permission-selector") {
+			if (scenario !== "config-options-ignored-mode") mode = params.value;
+		}
 		else {
 			send({ jsonrpc: "2.0", id, error: { code: -32602, message: "Unknown selector" } });
 			continue;
 		}
 		send({ jsonrpc: "2.0", id, result: { configOptions: sessionConfigOptions() } });
-	} else if (scenario === "config-options" && (method === "session/set_model" || method === "session/set_mode")) {
+	} else if (modern && (method === "session/set_model" || method === "session/set_mode")) {
 		send({ jsonrpc: "2.0", id, error: { code: -32601, message: "Use config options" } });
 	} else if (method === "session/set_model") {
 		model = params.modelId;
 		send({ jsonrpc: "2.0", id, result: {} });
 	} else if (method === "session/set_mode") {
+		if (scenario === "set-mode-fails" && params.modeId === "auto_edit") {
+			send({ jsonrpc: "2.0", id, error: { code: -32602, message: "Mode change refused" } });
+			continue;
+		}
 		mode = params.modeId;
 		send({ jsonrpc: "2.0", id, result: {} });
 	} else if (method === "session/prompt") {
 		const text = params.prompt.filter((block) => block.type === "text").map((block) => block.text).join("\n");
+		if (scenario === "mode-drift" || scenario === "config-options-mode-drift") {
+			mode = "yolo";
+			send({ jsonrpc: "2.0", method: "session/update", params: { sessionId: params.sessionId,
+				update: modern ? { sessionUpdate: "config_option_update", configOptions: sessionConfigOptions() }
+					: { sessionUpdate: "current_mode_update", currentModeId: mode } } });
+		}
+		if (text === "stream progress" || text === "native work" || text === "native stuck") {
+			hangingPromptId = id;
+			const notify = (update) => send({ jsonrpc: "2.0", method: "session/update", params: { sessionId: params.sessionId, update } });
+			if (text.startsWith("native")) notify({ sessionUpdate: "tool_call_update", toolCallId: "native", status: "in_progress" });
+			if (text === "native stuck") continue;
+			let count = 0;
+			const timer = setInterval(() => {
+				if (hangingPromptId !== id) { clearInterval(timer); return; }
+				count++;
+				if (text === "stream progress") notify({ sessionUpdate: "agent_message_chunk", content: { type: "text", text: "." } });
+				if (count < 8) return;
+				clearInterval(timer);
+				if (text === "native work") notify({ sessionUpdate: "tool_call_update", toolCallId: "native", status: "completed" });
+				hangingPromptId = undefined;
+				send({ jsonrpc: "2.0", id, result: { stopReason: "end_turn" } });
+			}, Number(process.env.FAKE_PROGRESS_STEP_MS ?? 30));
+			continue;
+		}
 		if (text.includes("bridge") && mcpServer) {
 			bridgePromptId = id;
 			const invocation = text.includes("parallel")
@@ -249,6 +274,13 @@ for await (const line of rl) {
 	} else {
 		send({ jsonrpc: "2.0", id, error: { code: -32601, message: `Unknown method ${method}` } });
 	}
+}
+
+function sessionModes(restored = false) {
+	if (scenario === "no-mode-metadata") return undefined;
+	const unavailable = scenario === "no-auto-edit-mode" ? "auto_edit"
+		: scenario === "no-default-mode" || (restored && scenario === "no-default-on-restore") ? "default" : undefined;
+	return { currentModeId: mode, availableModes: ["default", "auto_edit", "yolo"].filter((id) => id !== unavailable).map((id) => ({ id, name: id })) };
 }
 
 function sessionConfigOptions() {

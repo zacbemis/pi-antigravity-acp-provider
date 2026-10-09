@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 
 import { resolveAntigravityAcpLaunch } from "./antigravity.js";
 import { redact } from "./errors.js";
+import { applyAcpProxyEnvironment } from "./proxy.js";
 const STDERR_LIMIT = 16 * 1024;
 // Longer than supervisor.mjs's 750 ms agent-tree escalation window.
 const KILL_GRACE_MS = 1_500;
@@ -143,7 +144,7 @@ export class AntigravityProcess {
 			resolveExit = resolve;
 		});
 
-		const env = applyDefaultTlsEnvironment(options.env ?? process.env);
+		const env = applyDefaultTlsEnvironment(applyAcpProxyEnvironment(options.env ?? process.env));
 		const child = spawn(command, args, {
 			cwd: path.resolve(options.cwd),
 			env,
