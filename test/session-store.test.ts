@@ -54,6 +54,22 @@ describe("AcpSessionStore", () => {
 		);
 	});
 
+	it("keeps bindings isolated across custom profiles", () => {
+		const root = fs.mkdtempSync(path.join(os.tmpdir(), "isolated-session-profiles-"));
+		roots.push(root);
+		process.env.PI_CODING_AGENT_DIR = path.join(root, "one");
+		const first = new AcpSessionStore();
+		first.save({ piSessionId: "shared-id", acpSessionId: "profile-one", acpModelId: "auto", cwd: root,
+			messageCount: 1, historyFingerprint: "one", lastActive: Date.now() });
+		process.env.PI_CODING_AGENT_DIR = path.join(root, "two");
+		const second = new AcpSessionStore();
+		expect(second.get("shared-id")).toBeUndefined();
+		second.save({ piSessionId: "shared-id", acpSessionId: "profile-two", acpModelId: "auto", cwd: root,
+			messageCount: 1, historyFingerprint: "two", lastActive: Date.now() });
+		expect(first.get("shared-id")?.acpSessionId).toBe("profile-one");
+		expect(second.get("shared-id")?.acpSessionId).toBe("profile-two");
+	});
+
 	it("saves records to custom directory when PI_CODING_AGENT_DIR is set", () => {
 		const customAgentDir = fs.mkdtempSync(path.join(os.tmpdir(), "custom-agent-sessions-"));
 		roots.push(customAgentDir);

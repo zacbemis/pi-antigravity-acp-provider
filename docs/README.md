@@ -9,6 +9,7 @@ The documents separate observed facts, decisions, and planned work so future ups
 | [ANTIGRAVITY-MIGRATION.md](ANTIGRAVITY-MIGRATION.md) | Current runtime/auth architecture and live validation |
 | [IMPLEMENTATION-STATUS.md](IMPLEMENTATION-STATUS.md) | Implemented beta surface and remaining 1.0 release gates |
 | [RUNTIME-UPDATES.md](RUNTIME-UPDATES.md) | Signed runtime catalog, automatic update policy, and maintainer workflow |
+| [MAINTENANCE.md](MAINTENANCE.md) | Supported dependency versions, CI, profiles, release checklist, and branch-protection follow-up |
 | [EXECUTIVE-SUMMARY.md](EXECUTIVE-SUMMARY.md) | Recommendation, scope, and decisive tradeoffs |
 | [REQUIREMENTS.md](REQUIREMENTS.md) | Definition of “first-class,” “no special setup,” and acceptance criteria |
 | [RESEARCH.md](RESEARCH.md) | Pi, ACP, Gemini CLI, SDK, packaging, and ecosystem findings |
