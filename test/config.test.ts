@@ -49,6 +49,10 @@ describe("permission configuration", () => {
 	});
 
 	it("respects PI_CODING_AGENT_DIR environment variable", () => {
+		// Never inherit a developer's real permission configuration in this test.
+		const fakeHome = fs.mkdtempSync(path.join(os.tmpdir(), "isolated-home-"));
+		directories.push(fakeHome);
+		vi.spyOn(os, "homedir").mockReturnValue(fakeHome);
 		const customAgentDir = fs.mkdtempSync(path.join(os.tmpdir(), "custom-agent-"));
 		directories.push(customAgentDir);
 		process.env.PI_CODING_AGENT_DIR = customAgentDir;
@@ -120,5 +124,30 @@ describe("permission configuration", () => {
 		expect(loadConfig()).toEqual({ permissions: "auto_edit", runtimeUpdates: "notify" });
 		const targetFile = path.join(customAgentDir, "antigravity-acp-provider", "config.json");
 		expect(fs.existsSync(targetFile)).toBe(true);
+		expect(fs.readFileSync(path.join(defaultAntigravityDir, "config.json"), "utf8")).toBe(
+			JSON.stringify({ permissions: "auto_edit", runtimeUpdates: "notify" }),
+		);
+		if (process.platform !== "win32") expect(fs.statSync(targetFile).mode & 0o777).toBe(0o600);
+	});
+
+	it("does not overwrite an existing custom profile or copy saved sessions", () => {
+		const root = fs.mkdtempSync(path.join(os.tmpdir(), "profile-migration-"));
+		directories.push(root);
+		vi.spyOn(os, "homedir").mockReturnValue(path.join(root, "home"));
+		const source = path.join(root, "home", ".pi", "agent", "antigravity-acp-provider");
+		fs.mkdirSync(source, { recursive: true });
+		fs.writeFileSync(path.join(source, "config.json"), JSON.stringify({ permissions: "yolo", runtimeUpdates: "automatic" }));
+		fs.writeFileSync(path.join(source, "sessions.json"), "[]");
+		process.env.PI_CODING_AGENT_DIR = path.join(root, "custom");
+		const target = resolveConfigPath();
+		fs.mkdirSync(path.dirname(target), { recursive: true });
+		const existing = JSON.stringify({ permissions: "default", runtimeUpdates: "manual" });
+		fs.writeFileSync(target, existing);
+		expect(loadConfig()).toEqual({ permissions: "default", runtimeUpdates: "manual" });
+		expect(fs.readFileSync(target, "utf8")).toBe(existing);
+		fs.unlinkSync(target);
+		expect(loadConfig()).toEqual({ permissions: "yolo", runtimeUpdates: "automatic" });
+		expect(fs.existsSync(path.join(path.dirname(target), "sessions.json"))).toBe(false);
+		expect(fs.existsSync(path.join(source, "sessions.json"))).toBe(true);
 	});
 });

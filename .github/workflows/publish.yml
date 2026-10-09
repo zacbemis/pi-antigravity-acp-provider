@@ -28,6 +28,9 @@ jobs:
         run: test "v$(node -p "require('./package.json').version")" = "$GITHUB_REF_NAME"
       - run: npm ci
       - run: npm run check
+      - run: npm run pack:check
+      - run: npm run test:packed
+      - run: npm audit --audit-level=moderate
       - name: Check whether this version is already published
         id: registry
         shell: bash

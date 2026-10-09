@@ -88,6 +88,8 @@ Antigravity owns OAuth tokens under `~/.gemini/antigravity-acp/`; Pi stores only
 
 Permission and runtime-update modes are saved in `$PI_CODING_AGENT_DIR/antigravity-acp-provider/config.json` (where `PI_CODING_AGENT_DIR` defaults to `~/.pi/agent`). Runtime updates default to `automatic`; only provider-managed installations are replaced. ACP session bindings are saved beside the config in `sessions.json`.
 
+On first use of a custom profile without a config, existing permission/update settings are copied from the default agent directory (or the legacy Gemini-provider config). Existing custom configs are never overwritten, and saved sessions are not copied. **Custom Pi profiles do not isolate Antigravity accounts or managed runtimes:** Antigravity's OAuth credentials and runtime installation remain in their shared locations.
+
 `logout`/`account` clears local Antigravity credentials and saved ACP sessions. Run Pi's `/logout` afterward to remove the Pi credential marker, then `/login` for the new account. `update` checks the official registry and installs its newest release only after matching it to the provider's signed runtime catalog. See [`docs/RUNTIME-UPDATES.md`](docs/RUNTIME-UPDATES.md).
 
 ## Development
@@ -104,6 +106,8 @@ npm audit --audit-level=moderate
 npm run refresh:runtime-manifest
 ACP_RUNTIME_MANIFEST_PRIVATE_KEY_PATH=/secure/key.pem npm run sign:runtime-manifest
 ```
+
+CI checks Node 22.19.0 and 24, including typechecking, unit tests, packed installation and the full dependency audit. Live authenticated tests are opt-in and are not part of PR CI. See [`docs/MAINTENANCE.md`](docs/MAINTENANCE.md) for update and release policy.
 
 ## Security boundary
 

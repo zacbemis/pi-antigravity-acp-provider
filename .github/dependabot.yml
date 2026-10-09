@@ -6,6 +6,11 @@ updates:
       interval: weekly
       day: monday
     open-pull-requests-limit: 5
+    # Keep declarations aligned with the newest supported Node runtime (24).
+    ignore:
+      - dependency-name: "@types/node"
+        update-types:
+          - version-update:semver-major
     groups:
       pi:
         patterns:
