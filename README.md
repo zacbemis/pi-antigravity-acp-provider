@@ -98,7 +98,7 @@ npm run test:real-acp  # initializes the installed Antigravity ACP server
 npm run test:live      # sends a real authenticated prompt
 npm run test:qualify   # live cancel, restore, MCP, model, and permission qualification
 npm run test:packed
-npm audit --audit-level=high
+npm audit --audit-level=moderate
 
 # Maintainer-only runtime catalog refresh/signing
 npm run refresh:runtime-manifest
@@ -111,7 +111,7 @@ This launches a full coding agent with the user's OS privileges. **The default `
 
 ## Compatibility
 
-The implementation is pinned to Pi 0.85.0, ACP SDK 0.19.1, and ACP protocol 1. The bundled signed catalog bootstraps Antigravity ACP 1.1.1 and can accept newer signed catalog releases without an npm update. ACP session setup allows up to two minutes for slow first-run initialization, while transport shutdown rejects pending requests immediately. The official registry currently provides Linux x64/ARM64, Windows x64/ARM64, and macOS ARM64 artifacts. Intel macOS has no pinned artifact, and Alpine/musl is rejected because Google's Linux build targets glibc.
+This release requires Pi 1.1.x and Node.js 22.19.0 or newer; development is pinned to Pi 1.1.0, ACP SDK 0.19.1, and ACP protocol 1. Upgrade Pi before upgrading from provider 0.1.12. Pi supplies the host packages at runtime, so their peer ranges remain `*` as required by Pi's package contract; this is not a promise of compatibility with every Pi version. Transcript system instructions and tool additions/removals are replayed into ACP checkpoints, replacing stale warm sessions when that state changes. The bundled signed catalog bootstraps Antigravity ACP 1.1.1 and can accept newer signed catalog releases without an npm update. ACP session setup allows up to two minutes for slow first-run initialization, while transport shutdown rejects pending requests immediately. The official registry currently provides Linux x64/ARM64, Windows x64/ARM64, and macOS ARM64 artifacts. Intel macOS has no pinned artifact, and Alpine/musl is rejected because Google's Linux build targets glibc.
 
 During browser authentication, Chromium may write `Opening in existing browser session.` to the ACP process's inherited stdout. The transport ignores only that exact known compatibility line and reports its count in `doctor`; all other non-JSON stdout remains a fatal protocol error.
 

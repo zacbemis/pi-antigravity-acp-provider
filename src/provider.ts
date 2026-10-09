@@ -2,7 +2,7 @@ import type {
 	Api,
 	ApiStreamOptions,
 	AssistantMessageEventStream,
-	Context,
+	TranscriptContext,
 	Model,
 	Provider,
 	RefreshModelsContext,
@@ -140,7 +140,7 @@ export function createAntigravityProvider(runtime = new AntigravityRuntime()): A
 function stream(
 	runtime: AntigravityRuntime,
 	model: Model<"antigravity-acp">,
-	context: Context,
+	context: TranscriptContext,
 	options: ApiStreamOptions<"antigravity-acp"> | SimpleStreamOptions | undefined,
 ): AssistantMessageEventStream {
 	return runtime.stream(model, context, options as SimpleStreamOptions | undefined).stream;

@@ -64,6 +64,27 @@ describe("prompt context", () => {
 		expect(result.prompt[1]).toMatchObject({ type: "text", text: expect.stringContaining("Continue") });
 	});
 
+	it("replays transcript system sections separately from conversation history", () => {
+		const context: Context = {
+			messages: [
+				{ role: "system", content: "Base instructions", sections: { rules: "Old rules", removed: "Obsolete" }, timestamp: 0 },
+				{ role: "user", content: "old", timestamp: 1 },
+				{ role: "system", content: "Additional instructions", sections: { rules: "New rules", removed: null }, timestamp: 2 },
+				{ role: "user", content: "new", timestamp: 3 },
+			],
+		};
+		const result = buildPromptParts(context, true);
+		const block = result.prompt[0];
+		if (block?.type !== "resource" || !("text" in block.resource)) throw new Error("missing context");
+		expect(block.resource.text).toContain("Base instructions");
+		expect(block.resource.text).toContain("Additional instructions");
+		expect(block.resource.text).toContain("New rules");
+		expect(block.resource.text).not.toContain("Old rules");
+		expect(block.resource.text).not.toContain("Obsolete");
+		expect(block.resource.text).not.toContain("Tool result (undefined");
+		expect(result.prompt[1]).toEqual({ type: "text", text: "new" });
+	});
+
 	it("adds only unseen external deltas to a warm prompt", () => {
 		const context: Context = {
 			messages: [
