@@ -27,8 +27,18 @@ TypeScript 7.0.2 is supported. The multiprocess session-store tests bundle the a
 4. Create an annotated `v<version>` tag on that exact main commit and push it. The existing publish workflow uses npm trusted publishing/OIDC; do not introduce a long-lived npm token.
 5. Verify the publish workflow, npm version, and GitHub release. Authenticated prompt/cancellation qualification is opt-in and must be explicitly requested; PR CI does not use real Google credentials.
 
-## Branch protection follow-up
+## Protected runtime publication
 
-The daily signed-runtime workflow currently pushes directly to main with `GITHUB_TOKEN`. GitHub rejects the built-in GitHub Actions app as a ruleset bypass actor for this personal repository. Enforcing required PR/check rules now would break runtime updates.
+The `main CI` ruleset requires a PR, an up-to-date base, successful `Check (22.19.0)` and `Check (24)` jobs from GitHub Actions, linear history, and no force pushes or deletion. No actor bypasses these rules. The older disabled `gitrules` ruleset remains unchanged.
 
-Before protecting main, migrate runtime publication to a tested PR-based flow (explicitly dispatching CI because bot-token pushes do not trigger workflows), or provision a dedicated installed GitHub App with a narrowly scoped bypass. Do not silently bypass checks or disable signed runtime updates. Keep the existing disabled ruleset unchanged until this automation is ready.
+The daily updater publishes only `runtime-manifest.json` on a unique automation branch. It opens a PR, refreshes its base, explicitly dispatches `ci.yml` (bot-token PRs do not trigger workflows), verifies both real CI jobs on that exact head, and squash-merges through normal protection. Failed checks leave the signed PR open for inspection; no fabricated statuses or direct main pushes are used.
+
+Repository Actions settings must allow GitHub Actions to create PRs. Default token permissions remain read-only; only the updater grants `contents`, `pull-requests`, and `actions` write permissions. It never approves reviews and needs no PAT, installed app bypass, or auto-merge exemption. Signing keys are removed from runner temporary storage after signing.
+
+Validate the bot path without new artifact downloads or a signing key:
+
+```bash
+gh workflow run update-runtime-manifest.yml -f publication_test=true
+```
+
+This changes only whitespace around the existing valid signed catalog, dispatches both checks, then closes the PR without changing main. To verify the complete protected merge path, also pass `-f merge_publication_test=true`; only whitespace changes, never the signature payload or approved runtime releases.
