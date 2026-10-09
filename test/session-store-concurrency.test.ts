@@ -17,12 +17,17 @@ describe("cross-process session transactions", () => {
 		try {
 			// Compile just these modules for standalone child processes, avoiding
 			// Vitest's in-process module cache and any real provider/backend.
-			for (const name of ["store-lock", "session-store"]) {
-				const source = fs.readFileSync(fileURLToPath(new URL(`../src/acp/${name}.ts`, import.meta.url)), "utf8");
+			for (const item of [
+				{ name: "config", relPath: "../src/config.ts" },
+				{ name: "store-lock", relPath: "../src/acp/store-lock.ts" },
+				{ name: "session-store", relPath: "../src/acp/session-store.ts" },
+			]) {
+				const source = fs.readFileSync(fileURLToPath(new URL(item.relPath, import.meta.url)), "utf8");
 				const compiled = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, esModuleInterop: true } }).outputText
 					.replace('require("./store-lock.js")', 'require("./store-lock.cjs")')
+					.replace('require("../config.js")', 'require("./config.cjs")')
 					.replace('require("proper-lockfile")', `require(${JSON.stringify(require.resolve("proper-lockfile"))})`);
-				fs.writeFileSync(path.join(dir, `${name}.cjs`), compiled);
+				fs.writeFileSync(path.join(dir, `${item.name}.cjs`), compiled);
 			}
 			const file = path.join(dir, "sessions.json");
 			const worker = `
