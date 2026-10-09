@@ -31,9 +31,9 @@ TypeScript 7.0.2 is supported. The multiprocess session-store tests bundle the a
 
 The `main CI` ruleset requires a PR, an up-to-date base, successful `Check (22.19.0)` and `Check (24)` jobs from GitHub Actions, linear history, and no force pushes or deletion. No actor bypasses these rules. The older disabled `gitrules` ruleset remains unchanged.
 
-The daily updater publishes only `runtime-manifest.json` on a unique automation branch. It opens a PR, refreshes its base, explicitly dispatches `ci.yml` (bot-token PRs do not trigger workflows), verifies both real CI jobs on that exact head, and squash-merges through normal protection. Failed checks leave the signed PR open for inspection; no fabricated statuses or direct main pushes are used.
+The daily updater publishes only `runtime-manifest.json` on a unique automation branch. It opens a PR, refreshes its base, explicitly dispatches `ci.yml`, verifies both real CI jobs on that exact head, and squash-merges through normal protection. Bot-token PR workflows are held for approval under GitHub's current policy. A separate dispatch-only CI reporting job therefore records each actual validation job's result and URL on the exact tested commit; missing/failed jobs are never reported as successful. Failed checks leave the signed PR open for inspection; no fabricated passes or direct main pushes are used.
 
-Repository Actions settings must allow GitHub Actions to create PRs. Default token permissions remain read-only; only the updater grants `contents`, `pull-requests`, and `actions` write permissions. It never approves reviews and needs no PAT, installed app bypass, or auto-merge exemption. Signing keys are removed from runner temporary storage after signing.
+Repository Actions settings must allow GitHub Actions to create PRs. Default token permissions and validation-job tokens remain read-only. Only the updater grants `contents`, `pull-requests`, and `actions` write permissions; the dispatch-only reporting job has `statuses: write` and read access to Actions metadata. It never approves reviews and needs no PAT, installed app bypass, or auto-merge exemption. Signing keys are removed from runner temporary storage after signing.
 
 Validate the bot path without new artifact downloads or a signing key:
 
