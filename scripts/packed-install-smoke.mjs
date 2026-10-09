@@ -8,7 +8,11 @@ const temporary = fs.mkdtempSync(path.join(os.tmpdir(), "pi-antigravity-acp-pack
 let tarball;
 
 try {
-	const packed = JSON.parse(execFileSync("npm", ["pack", "--json"], { cwd: root, encoding: "utf8" }))[0];
+	const name = JSON.parse(fs.readFileSync(path.join(root, "package.json"), "utf8")).name;
+	const output = JSON.parse(execFileSync("npm", ["pack", "--json"], { cwd: root, encoding: "utf8" }));
+	// npm 12 keys pack results by package name; earlier versions return an array.
+	const packed = Array.isArray(output) ? output[0] : output[name];
+	if (!packed?.filename) throw new Error("npm pack did not return a tarball filename");
 	tarball = path.join(root, packed.filename);
 	fs.writeFileSync(path.join(temporary, "package.json"), '{"private":true}\n');
 	execFileSync(
@@ -36,10 +40,14 @@ try {
 		],
 		{
 			encoding: "utf8",
-			env: { ...process.env, GEMINI_API_KEY: "packed-smoke-placeholder" },
+			env: {
+				...process.env,
+				PI_CODING_AGENT_DIR: path.join(temporary, "agent"),
+				GEMINI_API_KEY: "packed-smoke-placeholder",
+			},
 		},
 	);
-	if (!models.includes("antigravity-acp")) throw new Error("Packed extension did not register Gemini models");
+	if (!models.includes("antigravity-acp")) throw new Error("Packed extension did not register Antigravity models");
 	process.stdout.write("Packed install passed with Antigravity ACP setup support.\n");
 } finally {
 	fs.rmSync(temporary, { recursive: true, force: true });
