@@ -167,8 +167,12 @@ for await (const line of rl) {
 			bridgePromptId = id;
 			const invocation = text.includes("parallel")
 				? Promise.all([
-						invokeMcpTool(mcpServer, "first"),
-						new Promise((resolve) => setTimeout(resolve, 50)).then(() => invokeMcpTool(mcpServer, "second")),
+						text.includes("reversed")
+							? new Promise((resolve) => setTimeout(resolve, 50)).then(() => invokeMcpTool(mcpServer, "first"))
+							: invokeMcpTool(mcpServer, "first"),
+						text.includes("reversed")
+							? invokeMcpTool(mcpServer, "second")
+							: new Promise((resolve) => setTimeout(resolve, 50)).then(() => invokeMcpTool(mcpServer, "second")),
 					]).then((results) => results.join(","))
 				: invokeMcpTool(mcpServer, "from gemini");
 			void invocation.then(async (result) => {

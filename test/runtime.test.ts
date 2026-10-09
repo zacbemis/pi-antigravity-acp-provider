@@ -374,7 +374,7 @@ describe("AntigravityRuntime", () => {
 		}
 	});
 
-	it("batches staggered parallel MCP calls into one Pi tool turn", async () => {
+	it.each(["parallel", "parallel reversed"])("batches %s MCP calls into one Pi tool turn", async (scenario) => {
 		const runtime = new AntigravityRuntime(
 			(options) => new AntigravityAcpConnection({ ...options, command: process.execPath, args: [fakeAgent] }),
 		);
@@ -384,7 +384,7 @@ describe("AntigravityRuntime", () => {
 			];
 			const firstContext: Context = {
 				tools,
-				messages: [{ role: "user", content: "use bridge parallel", timestamp: 1 }],
+				messages: [{ role: "user", content: `use bridge ${scenario}`, timestamp: 1 }],
 			};
 			const first = runtime.stream(model, firstContext, {
 				sessionId: "parallel-session",
@@ -395,13 +395,14 @@ describe("AntigravityRuntime", () => {
 			const firstDone = firstEvents.at(-1);
 			if (firstDone?.type !== "done") throw new Error("missing parallel tool turn");
 			const calls = firstDone.message.content.filter((block) => block.type === "toolCall");
-			expect(calls.map((call) => call.arguments.text)).toEqual(["first", "second"]);
+			// Concurrent MCP clients may finish their handshakes in either order.
+			expect(calls.map((call) => call.arguments.text).sort()).toEqual(["first", "second"]);
 
 			const toolResults = calls.map((call, index) => ({
 				role: "toolResult" as const,
 				toolCallId: call.id,
 				toolName: call.name,
-				content: [{ type: "text" as const, text: `result-${index + 1}` }],
+				content: [{ type: "text" as const, text: `result-${call.arguments.text}` }],
 				isError: false,
 				timestamp: index + 2,
 			}));
@@ -414,7 +415,7 @@ describe("AntigravityRuntime", () => {
 				{ sessionId: "parallel-session", apiKey: "test-key" },
 			);
 			for await (const _event of second.stream) void _event;
-			expect(second.message.content).toEqual([{ type: "text", text: "result-1,result-2" }]);
+			expect(second.message.content).toEqual([{ type: "text", text: "result-first,result-second" }]);
 		} finally {
 			await runtime.close();
 		}
