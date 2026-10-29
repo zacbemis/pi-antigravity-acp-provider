@@ -26,18 +26,22 @@ import {
 	ACP_SDK_VERSION,
 	PACKAGE_VERSION,
 } from "../src/constants.js";
-import { createAntigravityProvider } from "../src/provider.js";
 import {
-	AntigravityRuntime,
 	PERMISSION_RESULT_KIND,
 	PERMISSION_TOOL_NAME,
+	type AntigravityConnectionFactory,
 	type PermissionToolResult,
 } from "../src/runtime.js";
+import { acquireSharedRuntime, releaseSharedRuntime } from "../src/shared-runtime.js";
 import { runSetupWizard } from "../src/wizard.js";
 
 export default function antigravityAcpExtension(pi: ExtensionAPI): void {
-	const runtime = new AntigravityRuntime(undefined, loadConfig().permissions);
-	const { provider } = createAntigravityProvider(runtime);
+	registerAntigravityAcp(pi);
+}
+
+export function registerAntigravityAcp(pi: ExtensionAPI, connectionFactory?: AntigravityConnectionFactory): void {
+	const shared = acquireSharedRuntime(connectionFactory);
+	const { runtime, provider } = shared;
 	pi.registerProvider(provider);
 
 	pi.registerTool({
@@ -226,8 +230,9 @@ export default function antigravityAcpExtension(pi: ExtensionAPI): void {
 		}
 	});
 
-	pi.on("session_shutdown", async () => {
-		await runtime.close();
+	pi.on("session_shutdown", async (event, ctx) => {
+		await runtime.closeSession(ctx.sessionManager.getSessionId());
+		await releaseSharedRuntime(shared, event.reason);
 	});
 }
 
