@@ -9,6 +9,7 @@ import { AntigravityAcpConnection } from "../src/acp/connection.js";
 import { AcpSessionStore } from "../src/acp/session-store.js";
 import { AntigravityRuntime, PERMISSION_TOOL_NAME, PERMISSION_RESULT_KIND } from "../src/runtime.js";
 import type { PermissionMode } from "../src/config.js";
+import type { AntigravityQuotaSnapshot } from "../src/acp/usage-quota.js";
 import type { PiEventWriter } from "../src/stream/pi-events.js";
 import { piToolFingerprint, PiMcpBridge } from "../src/mcp/bridge.js";
 
@@ -321,5 +322,127 @@ describe("tool projection diagnostics", () => {
 		expect(bridge.omissions.map((entry) => entry.name)).toEqual(["t64", "t65", "t66"]);
 		expect(piToolFingerprint(tools)).not.toBe(piToolFingerprint([{ ...tools[0]!, description: "changed" }]));
 		expect(piToolFingerprint(tools)).not.toBe(piToolFingerprint([...tools, { name: "bad", description: "bad", parameters: Type.String() }]));
+	});
+});
+
+describe("live quota", () => {
+	afterEach(() => { vi.useRealTimers(); });
+
+	it("reads quota with a raw /usage prompt on its own short-lived connection", async () => {
+		const { runtime, connections, entries } = setup();
+		const quota = await runtime.quota(undefined);
+		expect(quota.groups.map((group) => group.displayName)).toEqual(["Gemini Models", "Claude and GPT models", "Gemini 4 Argon"]);
+		expect(entries().filter((entry) => entry.method === "session/prompt").map((entry) => entry.prompt))
+			.toEqual([[{ type: "text", text: "/usage" }]]);
+		await connections[0]!.process.exited;
+		expect((await runtime.snapshot()).bindings).toBe(0);
+	});
+
+	it("caches a snapshot for 60 seconds and shares one request between concurrent callers", async () => {
+		vi.useFakeTimers({ toFake: ["Date"] });
+		const { runtime, connections } = setup();
+		const [first, second] = await Promise.all([runtime.quota(undefined), runtime.quota(undefined)]);
+		expect(second).toBe(first);
+		expect(await runtime.quota(undefined)).toBe(first);
+		expect(connections).toHaveLength(1);
+
+		vi.advanceTimersByTime(61_000);
+		await runtime.quota(undefined);
+		expect(connections).toHaveLength(2);
+	});
+
+	it("drops the cached snapshot on logout", async () => {
+		const { root, runtime, connections } = setup();
+		vi.stubEnv("GEMINI_HOME", path.join(root, "gemini"));
+		try {
+			await runtime.quota(undefined);
+			await runtime.logout();
+			await runtime.quota(undefined);
+			expect(connections).toHaveLength(2);
+		} finally {
+			vi.unstubAllEnvs();
+		}
+	});
+
+	it("does not populate the cache if logout occurs while a quota read is in flight", async () => {
+		const { root, runtime } = setup();
+		vi.stubEnv("GEMINI_HOME", path.join(root, "gemini"));
+		try {
+			let resolveQuota!: (snapshot: AntigravityQuotaSnapshot) => void;
+			const pendingSnapshot = new Promise<AntigravityQuotaSnapshot>((resolve) => { resolveQuota = resolve; });
+			vi.spyOn(runtime as unknown as { fetchQuota: () => Promise<AntigravityQuotaSnapshot> }, "fetchQuota").mockReturnValue(pendingSnapshot);
+			const quotaPromise = runtime.quota(undefined);
+			await runtime.logout();
+			resolveQuota({ at: Date.now(), groups: [] });
+			await quotaPromise;
+			expect((runtime as unknown as { quotaCache: unknown }).quotaCache).toBeUndefined();
+		} finally {
+			vi.unstubAllEnvs();
+		}
+	});
+
+	it("does not cache a failed quota read", async () => {
+		const { runtime, connections } = setup("usage-unavailable");
+		await expect(runtime.quota(undefined)).rejects.toThrow("Unable to retrieve quota status (backend unavailable)");
+		await expect(runtime.quota(undefined)).rejects.toThrow("no quota groups");
+		expect(connections).toHaveLength(2);
+	});
+
+	it("rejects an aborted caller without cancelling the shared request", async () => {
+		const { runtime, connections } = setup();
+		const controller = new AbortController();
+		const aborted = runtime.quota(undefined, controller.signal);
+		const shared = runtime.quota(undefined);
+		controller.abort();
+		await expect(aborted).rejects.toThrow("aborted");
+		expect((await shared).groups).toHaveLength(3);
+		expect(connections).toHaveLength(1);
+	});
+});
+
+describe("throwaway conversations", () => {
+	const userSid = "0f8fad5b-d9cb-469f-a165-70867728950e";
+	function conversationsIn(root: string, sids: "uuid" | "plain" = "uuid") {
+		const acp = path.join(root, "gemini", "antigravity-acp");
+		const conversations = path.join(acp, "conversations");
+		fs.mkdirSync(conversations, { recursive: true });
+		for (const suffix of [".db", ".db-shm", ".db-wal", ".meta"]) fs.writeFileSync(path.join(conversations, userSid + suffix), "user");
+		fs.writeFileSync(path.join(acp, "acp_token.json"), "{}");
+		vi.stubEnv("GEMINI_HOME", path.join(root, "gemini"));
+		vi.stubEnv("FAKE_AGENT_CONVERSATIONS", sids);
+		return {
+			files: () => fs.readdirSync(conversations).sort(),
+			token: () => fs.existsSync(path.join(acp, "acp_token.json")),
+		};
+	}
+	const userFiles = [".db", ".db-shm", ".db-wal", ".meta"].map((suffix) => userSid + suffix).sort();
+	afterEach(() => { vi.unstubAllEnvs(); });
+
+	it("removes the conversation a quota read creates and nothing else", async () => {
+		const { root, runtime, connections } = setup();
+		const store = conversationsIn(root);
+		expect((await runtime.quota(undefined)).groups).toHaveLength(3);
+		await connections[0]!.process.exited;
+		expect(store.files()).toEqual(userFiles);
+		expect(store.token()).toBe(true);
+	});
+
+	it("keeps the conversation of a user turn", async () => {
+		const { root, runtime, connections } = setup();
+		const store = conversationsIn(root);
+		expect((await turn(runtime, [user("hello")])).stopReason).toBe("stop");
+		const afterTurn = store.files();
+		expect(afterTurn).toHaveLength(8);
+		await runtime.quota(undefined);
+		await connections.at(-1)!.process.exited;
+		expect(store.files()).toEqual(afterTurn);
+	});
+
+	it("deletes nothing for a session id that is not a UUID", async () => {
+		const { root, runtime, connections } = setup();
+		const store = conversationsIn(root, "plain");
+		await runtime.quota(undefined);
+		await connections[0]!.process.exited;
+		expect(store.files()).toEqual([...userFiles, "fake-session.db", "fake-session.db-shm", "fake-session.db-wal", "fake-session.meta"].sort());
 	});
 });
