@@ -501,8 +501,9 @@ export class AntigravityRuntime {
 		if (this.ensureAgent) await ensureAntigravityAcpReady();
 		await this.modeChanges;
 		this.assertEpoch(epoch);
-		const persistent = Boolean(options.sessionId);
-		const key = options.sessionId
+		// One-off requests (e.g. compaction summaries) never keep or save a session.
+		const persistent = Boolean(options.sessionId) && options.cacheRetention !== "none";
+		const key = persistent
 			? `sid:${options.sessionId}`
 			: (this.findContinuationKey(context) ?? `ephemeral:${crypto.randomUUID()}`);
 		const tools = context.tools ?? [];
