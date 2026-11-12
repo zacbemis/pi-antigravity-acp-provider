@@ -691,6 +691,9 @@ export class AntigravityRuntime {
 			throw error;
 		} finally {
 			if (onTurnAbort) options.signal?.removeEventListener("abort", onTurnAbort);
+			// ACP can time out before Pi's tool finishes; replay late results in a new prompt, not a dead continuation.
+			cancelPermission(binding);
+			cancelPiTools(binding, "Antigravity prompt ended before Pi returned the tool result");
 			completeTurn?.();
 			binding.turnCompletion = undefined;
 			binding.abortRequested = false;
@@ -703,7 +706,7 @@ export class AntigravityRuntime {
 
 	private async awaitContinuation(binding: Binding, signal?: AbortSignal): Promise<void> {
 		const completion = binding.turnCompletion;
-		if (!completion) return;
+		if (!completion) throw new AntigravityAcpError("protocol", "Antigravity prompt ended before Pi could continue");
 		if (!signal) {
 			await completion;
 			return;

@@ -311,12 +311,12 @@ describe("abort cleanup", () => {
 		} finally { complete?.(); await pending; vi.useRealTimers(); }
 	});
 
-	it("does not abort an idle binding or a newer turn through an old continuation", async () => {
+	it("rejects an idle continuation without aborting idle or newer turns", async () => {
 		const { runtime } = setup();
 		const internals = runtime as unknown as { awaitContinuation(binding: unknown, signal?: AbortSignal): Promise<void> };
 		let complete!: () => void;
 		const binding = { turnCompletion: undefined as Promise<void> | undefined, abortRequested: false, session: { sessionId: "unit" }, connection: { cancel: vi.fn(async () => undefined), close: vi.fn(async () => undefined) } };
-		await internals.awaitContinuation(binding, AbortSignal.abort());
+		await expect(internals.awaitContinuation(binding, AbortSignal.abort())).rejects.toMatchObject({ code: "protocol" });
 		expect(binding.abortRequested).toBe(false); expect(binding.connection.cancel).not.toHaveBeenCalled();
 		binding.turnCompletion = new Promise<void>((resolve) => { complete = resolve; });
 		const controller = new AbortController();
