@@ -285,6 +285,24 @@ for await (const line of rl) {
 				...(text.includes("refusal") || text.includes("quoted") ? { usage: { inputTokens: 10, outputTokens: 5, totalTokens: 15 } } : {}) } });
 			continue;
 		}
+		if (text.startsWith("usage multi")) {
+			const used = text.includes("overflow") ? 1100000 : text.includes("boundary") ? 1000000 : 270000;
+			const inputs = [270000, 270000, 270000, used];
+			const cachedReadTokens = text.includes("cached") ? 720000 : 0;
+			usageUpdate(0);
+			for (const context of inputs) usageUpdate(context);
+			notify({ sessionUpdate: "agent_message_chunk", content: { type: "text", text: "Done" } });
+			send({ jsonrpc: "2.0", id, result: { stopReason: "end_turn",
+				usage: { inputTokens: inputs.reduce((sum, context) => sum + context - 1000, 0),
+					cachedReadTokens, outputTokens: 4000, totalTokens: inputs.reduce((sum, context) => sum + context, 0) } } });
+			continue;
+		}
+		if (text === "usage overflow error") {
+			usageUpdate(270000);
+			send({ jsonrpc: "2.0", id, error: { code: -32603,
+				message: "The input token count (1100000) exceeds the maximum number of tokens allowed (1000000)" } });
+			continue;
+		}
 		if (text === "usage single") {
 			usageUpdate(1600);
 			notify({ sessionUpdate: "agent_message_chunk", content: { type: "text", text: "Hello" } });

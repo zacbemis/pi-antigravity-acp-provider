@@ -1,4 +1,4 @@
-import { normalizeContext, type Context, type Model } from "@earendil-works/pi-ai";
+import { isContextOverflow, normalizeContext, type Context, type Model } from "@earendil-works/pi-ai";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -102,6 +102,27 @@ describe("permission policy and lifecycle", () => {
 });
 
 describe("context size from usage_update", () => {
+	it.each([
+		["usage multi", false, 1076000, 0],
+		["usage multi cached", false, 356000, 720000],
+		["usage multi cached boundary", false, 1086000, 720000],
+		["usage multi cached overflow", true, 1186000, 720000],
+	] as const)("detects overflow from the latest context, not billed tokens: %s", async (prompt, overflow, input, cacheRead) => {
+		const { runtime } = setup();
+		const message = await turn(runtime, [user(prompt)]);
+		expect(message.stopReason).toBe("stop");
+		expect(isContextOverflow(message, model.contextWindow)).toBe(overflow);
+		expect(message.usage.input + message.usage.cacheRead).toBeLessThanOrEqual(message.usage.totalTokens);
+		expect((await runtime.snapshot()).metrics.totals).toMatchObject({ turns: 1, input, cacheRead, output: 4000 });
+	});
+
+	it("preserves explicit context overflow errors", async () => {
+		const { runtime } = setup();
+		const message = await turn(runtime, [user("usage overflow error")]);
+		expect(message.stopReason).toBe("error");
+		expect(isContextOverflow(message, model.contextWindow)).toBe(true);
+	});
+
 	it("reports each message's context size instead of the turn's summed usage", async () => {
 		const { runtime } = setup();
 		const first = await drain(runtime.stream(model, { tools, messages: [user("bridge usage")] }, { sessionId: "usage", apiKey: "test-key" }));
@@ -113,7 +134,8 @@ describe("context size from usage_update", () => {
 			{ role: "toolResult", toolCallId: call.id, toolName: call.name, content: [{ type: "text", text: "done" }], isError: false, timestamp: 2 },
 		] }, { sessionId: "usage", apiKey: "test-key" }));
 		expect(final.stopReason).toBe("stop");
-		expect(final.usage).toMatchObject({ input: 2400, output: 200, totalTokens: 1800 });
+		expect(final.usage).toMatchObject({ output: 200, totalTokens: 1800 });
+		expect(isContextOverflow(final, 1800)).toBe(false);
 	});
 
 	it("removes the double-counted cache read on a single-inference prompt", async () => {
