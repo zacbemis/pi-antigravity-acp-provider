@@ -1,4 +1,5 @@
 import { normalizeContext, type Context, type Model } from "@earendil-works/pi-ai";
+import { randomUUID } from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -163,6 +164,39 @@ describe("session lifecycle", () => {
 		await drained;
 		expect(events.at(-1)).toMatchObject({ type: "error", reason: "aborted" });
 		await connections[0]!.process.exited;
+		expect((await runtime.snapshot()).bindings).toBe(0);
+	});
+
+	it("keeps neither a binding nor a saved record for one-off requests", async () => {
+		const fixture = setup();
+		const store = new AcpSessionStore(path.join(fixture.root, "sessions.json"));
+		const { runtime, connections } = setup(undefined, "yolo", store);
+		const ids = [randomUUID(), randomUUID(), randomUUID()];
+		for (const sessionId of ids) {
+			const message = await drain(runtime.stream(model, { messages: [user("summarize")] }, { sessionId, cacheRetention: "none", apiKey: "test-key" }));
+			expect(message.stopReason).toBe("stop");
+		}
+
+		expect((await runtime.snapshot()).bindings).toBe(0);
+		for (const id of ids) expect(store.get(id)).toBeUndefined();
+		await Promise.all(connections.map((connection) => connection.process.exited));
+		expect(connections).toHaveLength(3);
+	});
+
+	it("resumes a one-off request's parked permission and then drops its binding", async () => {
+		const { runtime, connections } = setup();
+		const options = { sessionId: randomUUID(), cacheRetention: "none" as const, apiKey: "test-key" };
+		const messages = [user("request permission")];
+		const first = await drain(runtime.stream(model, { messages }, options));
+		const call = first.content.find((block) => block.type === "toolCall");
+		if (call?.type !== "toolCall") throw new Error("missing permission tool call");
+
+		const second = await drain(runtime.stream(model, { messages: [...messages, first, { role: "toolResult", toolCallId: call.id,
+			toolName: PERMISSION_TOOL_NAME, content: [{ type: "text", text: "Rejected" }], isError: false, timestamp: 2,
+			details: { kind: PERMISSION_RESULT_KIND, requestId: call.id, optionId: "reject-once", cancelled: false } }] }, options));
+
+		expect(second.stopReason).toBe("stop");
+		expect(connections).toHaveLength(1);
 		expect((await runtime.snapshot()).bindings).toBe(0);
 	});
 });
