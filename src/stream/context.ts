@@ -15,6 +15,30 @@ const CONTINUATION_LABEL =
 const WARM_CONTINUATION =
 	"Continue the current Pi user request already given in this session. Incorporate the latest tool results without repeating completed tool actions.";
 const LINE_BREAKS = /[\r\n\v\f\u0085\u2028\u2029]+/gu;
+/**
+ * agy runs `/plan` when it is matched per text block at the start or after (Python) whitespace, and `/logout`
+ * and `/usage` only on the joined, stripped text of all text blocks. U+200B before the slash stops it.
+ * agy 1.4.3 strips U+200B, leading or mid-line, after slash parsing and before the model and the transcript,
+ * so the marker never reaches the model or its tool arguments; mid-line `/usage` and `/logout` are not
+ * intercepted, but marking them is harmless.
+ */
+const SLASH_COMMAND = /(^|[\s\x1c-\x1f\x85])\/(?=(?:plan|usage|logout)(?:[\s\x1c-\x1f\x85]|$))/giu;
+const LEADING_SPACE = /^[\s\x1c-\x1f\x85]*/u;
+
+export function neutralizeSlashCommands(text: string): string {
+	return text.replace(SLASH_COMMAND, "$1\u200B/");
+}
+
+/** Marks a slash that starts the user's joined text, even when split across blocks. */
+function neutralizeLeadingSlash(blocks: ContentBlock[]): void {
+	for (const block of blocks) {
+		if (block.type !== "text") continue;
+		const start = LEADING_SPACE.exec(block.text)![0].length;
+		if (start === block.text.length) continue;
+		if (block.text[start] === "/") block.text = `${block.text.slice(0, start)}\u200B${block.text.slice(start)}`;
+		return;
+	}
+}
 
 /** Instructions are never silently truncated or counted as consumed by a tool continuation. */
 export function currentSystemInstructions(context: Context): string {
@@ -81,14 +105,17 @@ export function buildPromptParts(
 	// The active request is an explicit user turn, never solely untrusted,
 	// truncatable history. This also preserves its image blocks on handoff.
 	if (hasTrailingResults) prompt.push({ type: "text", text: CONTINUATION_LABEL });
+	const request: ContentBlock[] = [];
 	if (typeof latest.content === "string") {
-		if (latest.content.length > 0) prompt.push({ type: "text", text: latest.content });
+		if (latest.content.length > 0) request.push({ type: "text", text: neutralizeSlashCommands(latest.content) });
 	} else {
 		for (const block of latest.content) {
-			if (block.type === "text") prompt.push({ type: "text", text: block.text });
-			else prompt.push({ type: "image", data: block.data, mimeType: block.mimeType });
+			if (block.type === "text") request.push({ type: "text", text: neutralizeSlashCommands(block.text) });
+			else request.push({ type: "image", data: block.data, mimeType: block.mimeType });
 		}
 	}
+	neutralizeLeadingSlash(request);
+	prompt.push(...request);
 	if (prompt.length === 0) throw new AntigravityAcpError("invalid_input", "User message has no supported content");
 	return { prompt, messageCount: context.messages.length };
 }

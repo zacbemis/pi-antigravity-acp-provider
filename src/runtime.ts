@@ -501,8 +501,9 @@ export class AntigravityRuntime {
 		if (this.ensureAgent) await ensureAntigravityAcpReady();
 		await this.modeChanges;
 		this.assertEpoch(epoch);
-		const persistent = Boolean(options.sessionId);
-		const key = options.sessionId
+		// One-off requests (e.g. compaction summaries) never keep or save a session.
+		const persistent = Boolean(options.sessionId) && options.cacheRetention !== "none";
+		const key = persistent
 			? `sid:${options.sessionId}`
 			: (this.findContinuationKey(context) ?? `ephemeral:${crypto.randomUUID()}`);
 		const tools = context.tools ?? [];
@@ -660,12 +661,14 @@ export class AntigravityRuntime {
 					`Antigravity quota exceeded for ${binding.modelId}.${quota.resetAt ? ` Resets at ${quota.resetAt}.` : ""}`);
 			}
 			if (binding.contextUsed !== undefined) {
-				// Pi sizes the context from the last message's totalTokens, but the response sums every
-				// inference. agy adds cache reads to `used` twice; with one inference the response's cache
-				// count is that inference's, so subtracting it is exact. Longer prompts with cache reads
-				// still overcount by the last inference's cached tokens.
+				// Pi checks input + cacheRead for silent overflow, not totalTokens. For multiple inferences,
+				// only the latest context size is known, not its cache split; metrics above keep billed totals.
+				// agy adds cache reads to `used` twice; only a single inference's cache count is exact,
+				// so multiple inferences still use `used` as an upper bound.
 				activeWriter.message.usage = {
 					...usage,
+					input: binding.inferences > 1 ? binding.contextUsed : usage.input,
+					cacheRead: binding.inferences > 1 ? 0 : usage.cacheRead,
 					totalTokens: binding.inferences === 1 ? Math.max(0, binding.contextUsed - usage.cacheRead) : binding.contextUsed,
 				};
 			} else activeWriter.message.usage = usage;

@@ -1,4 +1,5 @@
-import { normalizeContext, type Context, type Model } from "@earendil-works/pi-ai";
+import { isContextOverflow, normalizeContext, type Context, type Model } from "@earendil-works/pi-ai";
+import { randomUUID } from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -102,6 +103,27 @@ describe("permission policy and lifecycle", () => {
 });
 
 describe("context size from usage_update", () => {
+	it.each([
+		["usage multi", false, 1076000, 0],
+		["usage multi cached", false, 356000, 720000],
+		["usage multi cached boundary", false, 1086000, 720000],
+		["usage multi cached overflow", true, 1186000, 720000],
+	] as const)("detects overflow from the latest context, not billed tokens: %s", async (prompt, overflow, input, cacheRead) => {
+		const { runtime } = setup();
+		const message = await turn(runtime, [user(prompt)]);
+		expect(message.stopReason).toBe("stop");
+		expect(isContextOverflow(message, model.contextWindow)).toBe(overflow);
+		expect(message.usage.input + message.usage.cacheRead).toBeLessThanOrEqual(message.usage.totalTokens);
+		expect((await runtime.snapshot()).metrics.totals).toMatchObject({ turns: 1, input, cacheRead, output: 4000 });
+	});
+
+	it("preserves explicit context overflow errors", async () => {
+		const { runtime } = setup();
+		const message = await turn(runtime, [user("usage overflow error")]);
+		expect(message.stopReason).toBe("error");
+		expect(isContextOverflow(message, model.contextWindow)).toBe(true);
+	});
+
 	it("reports each message's context size instead of the turn's summed usage", async () => {
 		const { runtime } = setup();
 		const first = await drain(runtime.stream(model, { tools, messages: [user("bridge usage")] }, { sessionId: "usage", apiKey: "test-key" }));
@@ -113,7 +135,8 @@ describe("context size from usage_update", () => {
 			{ role: "toolResult", toolCallId: call.id, toolName: call.name, content: [{ type: "text", text: "done" }], isError: false, timestamp: 2 },
 		] }, { sessionId: "usage", apiKey: "test-key" }));
 		expect(final.stopReason).toBe("stop");
-		expect(final.usage).toMatchObject({ input: 2400, output: 200, totalTokens: 1800 });
+		expect(final.usage).toMatchObject({ output: 200, totalTokens: 1800 });
+		expect(isContextOverflow(final, 1800)).toBe(false);
 	});
 
 	it("removes the double-counted cache read on a single-inference prompt", async () => {
@@ -129,6 +152,21 @@ describe("context size from usage_update", () => {
 		const { runtime } = setup("quota-exhausted");
 		const message = await turn(runtime, [user("quoted")], "quota");
 		expect(message.usage).toMatchObject({ input: 10, output: 5, totalTokens: 15 });
+	});
+});
+
+describe("slash commands", () => {
+	it.each(["/usage", "/logout", "hi\n/plan x"])("never lets agy intercept the user message %j", async (content) => {
+		const { runtime, entries } = setup();
+		const message = await turn(runtime, [user(content)]);
+		expect(message.stopReason).toBe("stop");
+		expect(message.content.filter((block) => block.type === "text")).toEqual([{ type: "text", text: "Hello" }]);
+		const [prompt] = entries().filter((entry) => entry.method === "session/prompt");
+		const texts = (prompt!.prompt as { type: string; text?: string }[]).flatMap((block) => block.type === "text" ? [block.text!] : []);
+		const joined = texts.join("").trim();
+		expect(joined).not.toBe("/logout");
+		expect(joined).not.toMatch(/^\/usage(?:\s|$)/iu);
+		for (const text of texts) expect(text).not.toMatch(/(?:\s|^)\/plan(?:\s|$)/u);
 	});
 });
 
@@ -163,6 +201,39 @@ describe("session lifecycle", () => {
 		await drained;
 		expect(events.at(-1)).toMatchObject({ type: "error", reason: "aborted" });
 		await connections[0]!.process.exited;
+		expect((await runtime.snapshot()).bindings).toBe(0);
+	});
+
+	it("keeps neither a binding nor a saved record for one-off requests", async () => {
+		const fixture = setup();
+		const store = new AcpSessionStore(path.join(fixture.root, "sessions.json"));
+		const { runtime, connections } = setup(undefined, "yolo", store);
+		const ids = [randomUUID(), randomUUID(), randomUUID()];
+		for (const sessionId of ids) {
+			const message = await drain(runtime.stream(model, { messages: [user("summarize")] }, { sessionId, cacheRetention: "none", apiKey: "test-key" }));
+			expect(message.stopReason).toBe("stop");
+		}
+
+		expect((await runtime.snapshot()).bindings).toBe(0);
+		for (const id of ids) expect(store.get(id)).toBeUndefined();
+		await Promise.all(connections.map((connection) => connection.process.exited));
+		expect(connections).toHaveLength(3);
+	});
+
+	it("resumes a one-off request's parked permission and then drops its binding", async () => {
+		const { runtime, connections } = setup();
+		const options = { sessionId: randomUUID(), cacheRetention: "none" as const, apiKey: "test-key" };
+		const messages = [user("request permission")];
+		const first = await drain(runtime.stream(model, { messages }, options));
+		const call = first.content.find((block) => block.type === "toolCall");
+		if (call?.type !== "toolCall") throw new Error("missing permission tool call");
+
+		const second = await drain(runtime.stream(model, { messages: [...messages, first, { role: "toolResult", toolCallId: call.id,
+			toolName: PERMISSION_TOOL_NAME, content: [{ type: "text", text: "Rejected" }], isError: false, timestamp: 2,
+			details: { kind: PERMISSION_RESULT_KIND, requestId: call.id, optionId: "reject-once", cancelled: false } }] }, options));
+
+		expect(second.stopReason).toBe("stop");
+		expect(connections).toHaveLength(1);
 		expect((await runtime.snapshot()).bindings).toBe(0);
 	});
 });
