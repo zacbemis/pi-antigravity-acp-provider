@@ -78,19 +78,32 @@ export function registerAntigravityAcp(pi: ExtensionAPI, connectionFactory?: Ant
 		description: "Presents an Antigravity ACP permission request to the user. Only call IDs emitted by the provider are valid.",
 		parameters: Type.Object({ requestId: Type.String({ minLength: 1, maxLength: 128 }) }),
 		executionMode: "sequential",
-		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+		async execute(_toolCallId, params, signal, _onUpdate, ctx) {
 			const request = runtime.getPermission(params.requestId);
 			if (!request) throw new Error("This Antigravity permission request is missing, expired, or already used");
+			if (signal?.aborted || request.signal?.aborted) {
+				return {
+					content: [{ type: "text", text: "Permission cancelled." }],
+					details: { kind: PERMISSION_RESULT_KIND, requestId: request.id, cancelled: true },
+				};
+			}
 			const labels = request.options.map(
 				(option, index) => `${index + 1}. ${option.label} [${option.kind.replaceAll("_", " ")}]`,
 			);
+			const signals = [signal, request.signal].filter((item): item is AbortSignal => item !== undefined);
+			const dialogSignal = signals.length > 1 ? AbortSignal.any(signals) : signals[0];
 			let selected: string | undefined;
 			try {
-				selected = await ctx.ui.select(request.title, labels);
+				selected = await ctx.ui.select(
+					request.title,
+					labels,
+					dialogSignal ? { signal: dialogSignal } : undefined,
+				);
 			} catch {
 				// Print/RPC/headless modes deny when no interactive selector is available.
 			}
-			const selectedIndex = selected === undefined ? -1 : labels.indexOf(selected);
+			const aborted = signal?.aborted === true || request.signal?.aborted === true;
+			const selectedIndex = aborted || selected === undefined ? -1 : labels.indexOf(selected);
 			const optionId = selectedIndex < 0 ? undefined : request.options[selectedIndex]?.id;
 			const details: PermissionToolResult = {
 				kind: PERMISSION_RESULT_KIND,
@@ -102,7 +115,11 @@ export function registerAntigravityAcp(pi: ExtensionAPI, connectionFactory?: Ant
 				content: [
 					{
 						type: "text",
-						text: optionId === undefined ? "Permission denied." : `Permission decision recorded: ${selected}`,
+						text: aborted
+							? "Permission cancelled."
+							: optionId === undefined
+								? "Permission denied."
+								: `Permission decision recorded: ${selected}`,
 					},
 				],
 				details,

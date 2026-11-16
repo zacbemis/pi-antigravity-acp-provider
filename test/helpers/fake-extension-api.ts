@@ -71,13 +71,19 @@ export interface FakeContext {
 	ui: { select: ReturnType<typeof vi.fn>; notify: ReturnType<typeof vi.fn> };
 }
 
-export function createFakeContext(options: { sessionId: string; cwd?: string; selectAnswer?: (labels: string[]) => string | undefined }): FakeContext {
+export function createFakeContext(options: {
+	sessionId: string;
+	cwd?: string;
+	selectAnswer?: (labels: string[], opts?: { signal?: AbortSignal }) => string | undefined | Promise<string | undefined>;
+}): FakeContext {
 	return {
 		cwd: options.cwd ?? process.cwd(),
 		hasUI: true,
 		sessionManager: { getSessionId: () => options.sessionId },
 		ui: {
-			select: vi.fn(async (_title: string, labels: string[]) => options.selectAnswer?.(labels)),
+			select: vi.fn(async (_title: string, labels: string[], opts?: { signal?: AbortSignal }) =>
+				options.selectAnswer?.(labels, opts),
+			),
 			notify: vi.fn(),
 		},
 	};

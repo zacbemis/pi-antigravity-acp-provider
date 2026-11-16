@@ -279,6 +279,49 @@ describe("instruction updates during continuations", () => {
 		expect(JSON.stringify(entries().filter((entry) => entry.method === "session/prompt").at(-1)?.prompt)).toContain("NEW_RULE");
 	});
 
+	it.each(["after", "before"] as const)("replays user steering queued %s a Pi tool result", async (order) => {
+		const { runtime, entries } = setup();
+		const firstContext = normalizeContext({ tools, messages: [user("use bridge")] });
+		const first = await drain(runtime.stream(model, firstContext, { sessionId: `steer-tool-${order}`, apiKey: "test-key" }));
+		const call = first.content.find((block) => block.type === "toolCall");
+		if (call?.type !== "toolCall") throw new Error("missing call");
+		const toolResult = { role: "toolResult" as const, toolCallId: call.id, toolName: call.name, content: [{ type: "text" as const, text: "done" }], isError: false, timestamp: 2 };
+		const steering = user("STEERING_NOTE", 3);
+		const continuationMessages = order === "after"
+			? [...firstContext.messages, first, toolResult, steering]
+			: [...firstContext.messages, first, steering, toolResult];
+		const second = await drain(runtime.stream(model, normalizeContext({ tools, messages: continuationMessages }), { sessionId: `steer-tool-${order}`, apiKey: "test-key" }));
+		expect(second.stopReason).toBe("stop");
+		await drain(runtime.stream(model, normalizeContext({ tools, messages: [...continuationMessages, second, user("follow-up", 4)] }), { sessionId: `steer-tool-${order}`, apiKey: "test-key" }));
+		const prompts = entries().filter((entry) => entry.method === "session/prompt");
+		expect(prompts).toHaveLength(2);
+		expect(JSON.stringify(prompts[1]?.prompt)).toContain("STEERING_NOTE");
+	});
+
+	it.each(["after", "before"] as const)("replays user steering queued %s a permission result", async (order) => {
+		const { runtime, entries } = setup();
+		const firstContext = normalizeContext({ messages: [user("permission")] });
+		const first = await drain(runtime.stream(model, firstContext, { sessionId: `steer-perm-${order}`, apiKey: "test-key" }));
+		const call = first.content.find((block) => block.type === "toolCall");
+		if (call?.type !== "toolCall") throw new Error("missing permission call");
+		const permissionResult = {
+			role: "toolResult" as const, toolCallId: call.id, toolName: PERMISSION_TOOL_NAME,
+			content: [{ type: "text" as const, text: "Rejected" }],
+			details: { kind: PERMISSION_RESULT_KIND, requestId: call.id, optionId: "reject-once", cancelled: false },
+			isError: false, timestamp: 2,
+		};
+		const steering = user("STEERING_PERMISSION_NOTE", 3);
+		const continuationMessages = order === "after"
+			? [...firstContext.messages, first, permissionResult, steering]
+			: [...firstContext.messages, first, steering, permissionResult];
+		const second = await drain(runtime.stream(model, normalizeContext({ messages: continuationMessages }), { sessionId: `steer-perm-${order}`, apiKey: "test-key" }));
+		expect(second.stopReason).toBe("stop");
+		await drain(runtime.stream(model, normalizeContext({ messages: [...continuationMessages, second, user("follow-up", 4)] }), { sessionId: `steer-perm-${order}`, apiKey: "test-key" }));
+		const prompts = entries().filter((entry) => entry.method === "session/prompt");
+		expect(prompts).toHaveLength(2);
+		expect(JSON.stringify(prompts[1]?.prompt)).toContain("STEERING_PERMISSION_NOTE");
+	});
+
 	it("reports oversized instructions as a stream error before spawning", async () => {
 		const { runtime, connections } = setup();
 		const message = await drain(runtime.stream(model, { systemPrompt: "x".repeat(270000), messages: [user("hello")] }));
@@ -327,6 +370,63 @@ describe("abort cleanup", () => {
 			] }, { sessionId: "long-tool", apiKey: "test-key" }));
 			expect(second.content).toEqual([{ type: "text", text: "long tool result" }]);
 		} finally { vi.useRealTimers(); await runtime.close(); }
+	});
+
+	it("keeps a permission request parked beyond the former two-minute deadline", async () => {
+		vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"], shouldAdvanceTime: true });
+		const { runtime } = setup();
+		try {
+			const first = await drain(runtime.stream(model, { messages: [user("permission")] }, { sessionId: "long-permission", apiKey: "test-key" }));
+			const call = first.content.find((block) => block.type === "toolCall");
+			if (call?.type !== "toolCall") throw new Error("missing permission call");
+			vi.advanceTimersByTime(130_000);
+			expect((await runtime.snapshot()).processes[0]?.waitingForPermission).toBe(true);
+			expect(runtime.getPermission(call.id)?.signal?.aborted).toBe(false);
+			const second = await drain(runtime.stream(model, {
+				messages: [user("permission"), first, {
+					role: "toolResult", toolCallId: call.id, toolName: PERMISSION_TOOL_NAME,
+					content: [{ type: "text", text: "Approved" }],
+					details: { kind: PERMISSION_RESULT_KIND, requestId: call.id, optionId: "allow-once", cancelled: false },
+					isError: false, timestamp: 2,
+				}],
+			}, { sessionId: "long-permission", apiKey: "test-key" }));
+			expect(second.content).toEqual([{ type: "text", text: "Decision: selected" }]);
+		} finally { vi.useRealTimers(); await runtime.close(); }
+	});
+
+	it("formats concise permission dialogs without raw JSON dumps", () => {
+		const { runtime } = setup();
+		const internals = runtime as unknown as {
+			resolvedBindings: Set<unknown>;
+			requestPermission(binding: unknown, request: unknown): Promise<unknown>;
+		};
+		const binding = {
+			session: { sessionId: "unit" },
+			abortRequested: false,
+			pendingTools: new Map(),
+			permission: undefined as { id: string } | undefined,
+			writer: { finished: false, toolCall: vi.fn(), done: vi.fn() },
+		};
+		internals.resolvedBindings.add(binding);
+		void internals.requestPermission(binding, {
+			sessionId: "unit",
+			options: [{ optionId: "allow-once", name: "Allow once", kind: "allow_once" }],
+			toolCall: {
+				toolCallId: "native-1",
+				title: "Run\u0007 shell command",
+				kind: "execute",
+				locations: [{ path: "/repo/a.ts", line: 12 }, { path: "/repo/b.ts" }],
+				rawInput: { command: "npm test", extra: "x".repeat(500) },
+				content: [{ type: "diff", path: "/repo/a.ts" }],
+			},
+		});
+		const view = runtime.getPermission(binding.permission!.id);
+		expect(view?.title).toContain("Run shell command [execute]");
+		expect(view?.title).toContain("Locations: /repo/a.ts:12, /repo/b.ts");
+		expect(view?.title).toContain("command: npm test");
+		expect(view?.title).toContain("diff: /repo/a.ts");
+		expect(view?.title).not.toContain('"rawInput"');
+		expect(view?.title.length).toBeLessThanOrEqual(1_200);
 	});
 
 	it("releases partially parked calls and rejects new calls after abort", async () => {

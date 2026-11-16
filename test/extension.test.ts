@@ -130,6 +130,52 @@ describe("extension entry point", () => {
 		expect(result.details).toMatchObject({ requestId: call.id, optionId: "allow-once", cancelled: false });
 	});
 
+	it("forwards tool abort signals to the permission selector and cancels cleanly", async () => {
+		const parent = await load("parent");
+		const parked = await stream([user("request permission")], "parent", parent.pi.providers[0]);
+		const call = parked.content.find((block) => block.type === "toolCall");
+		if (call?.type !== "toolCall") throw new Error("missing permission tool call");
+
+		const controller = new AbortController();
+		const ctx = createFakeContext({
+			sessionId: "parent",
+			selectAnswer: (_labels, opts) => new Promise((resolve) => {
+				opts?.signal?.addEventListener("abort", () => resolve(undefined), { once: true });
+				controller.abort();
+			}),
+		});
+		const tool = parent.pi.tools.get(PERMISSION_TOOL_NAME);
+		if (!tool) throw new Error("missing permission tool");
+		const result = await tool.execute("call", { requestId: call.id }, controller.signal, undefined, ctx as never);
+
+		expect(ctx.ui.select.mock.calls[0]?.[2]).toEqual({ signal: expect.any(AbortSignal) });
+		expect(result.details).toMatchObject({ requestId: call.id, cancelled: true });
+		expect(result.content[0]).toEqual({ type: "text", text: "Permission cancelled." });
+	});
+
+	it("dismisses the permission selector when the parked permission is cancelled externally", async () => {
+		const parent = await load("parent");
+		const parked = await stream([user("request permission")], "parent", parent.pi.providers[0]);
+		const call = parked.content.find((block) => block.type === "toolCall");
+		if (call?.type !== "toolCall") throw new Error("missing permission tool call");
+
+		let observedSignal: AbortSignal | undefined;
+		const ctx = createFakeContext({
+			sessionId: "parent",
+			selectAnswer: (_labels, opts) => new Promise((resolve) => {
+				observedSignal = opts?.signal;
+				opts?.signal?.addEventListener("abort", () => resolve(undefined), { once: true });
+				void parent.pi.emit("session_shutdown", { reason: "quit" }, parent.ctx);
+			}),
+		});
+		const tool = parent.pi.tools.get(PERMISSION_TOOL_NAME);
+		if (!tool) throw new Error("missing permission tool");
+		const result = await tool.execute("call", { requestId: call.id }, undefined, undefined, ctx as never);
+
+		expect(observedSignal?.aborted).toBe(true);
+		expect(result.details).toMatchObject({ requestId: call.id, cancelled: true });
+	});
+
 	it("shares one provider across loads and closes it when the last instance quits", async () => {
 		const instances = [await load("a"), await load("b"), await load("c")];
 		expect(new Set(instances.map(({ pi }) => pi.providers[0])).size).toBe(1);
