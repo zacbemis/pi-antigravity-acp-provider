@@ -17,11 +17,14 @@ import {
 	isPermissionMode,
 	isRuntimeUpdateMode,
 	isToolActivityMode,
+	isToolBridgeMode,
 	loadConfig,
 	permissionModeLabel,
+	saveIsolatedGeminiHome,
 	savePermissionMode,
 	saveRuntimeUpdateMode,
 	saveToolActivityMode,
+	saveToolBridgeMode,
 	type PermissionMode,
 } from "../src/config.js";
 import {
@@ -47,6 +50,26 @@ export type { AntigravityQuotaSnapshot } from "../src/acp/usage-quota.js";
 const CLAIMED_QUOTA_REQUESTS = Symbol.for("pi-antigravity-acp:quota-requests");
 const claimSlots = globalThis as unknown as Record<symbol, WeakSet<object> | undefined>;
 const claimedQuotaRequests = (claimSlots[CLAIMED_QUOTA_REQUESTS] ??= new WeakSet());
+
+/** Registered as `/antigravity-acp:<name>` aliases in addition to the
+ * aggregate command, so each subcommand is directly discoverable. */
+const COLON_COMMANDS = [
+	{ name: "setup", description: "Install the ACP runtime and run the sign-in wizard" },
+	{ name: "update", description: "Install the latest signed ACP runtime" },
+	{ name: "update-runtime", description: "Install the latest signed ACP runtime (alias of update)" },
+	{ name: "updates", description: "Show or change the runtime update policy" },
+	{ name: "logout", description: "Clear local credentials and saved sessions for an account" },
+	{ name: "account", description: "Clear an account's local login (alias of logout)" },
+	{ name: "switch-account", description: "Clear the current login before choosing another account" },
+	{ name: "quota", description: "Show per-account quota and this process's token usage" },
+	{ name: "qualify", description: "Run the auth and model-availability qualification wizard" },
+	{ name: "permissions", description: "Set the Antigravity permission mode (default, auto-edit, yolo)" },
+	{ name: "tool-activity", description: "Show, hide or expand Antigravity tool progress" },
+	{ name: "tool-bridge", description: "Choose which Pi tools Antigravity may call" },
+	{ name: "isolated-home", description: "Toggle GEMINI_HOME isolation from ~/.gemini" },
+	{ name: "doctor", description: "Show runtime, auth and binding diagnostics (--verbose for stderr)" },
+	{ name: "status", description: "Show provider status and diagnostics" },
+] as const;
 
 export default function antigravityAcpExtension(pi: ExtensionAPI): void {
 	registerAntigravityAcp(pi);
@@ -221,10 +244,51 @@ export function registerAntigravityAcp(pi: ExtensionAPI, connectionFactory?: Ant
 				ctx.ui.notify(`Antigravity tool activity: ${requested}`, "info");
 				return;
 			}
+			if (command === "tool-bridge" || command.startsWith("tool-bridge ")) {
+				let requested = command.slice("tool-bridge".length).trim().toLowerCase();
+				if (!requested) {
+					const choices = [
+						"ecosystem — bridge only ecosystem tools (engram, codegraph, subagents) and let Antigravity use its native core tools (default)",
+						"all — bridge all active Pi tools via MCP",
+					];
+					const selected = await ctx.ui.select("Antigravity Pi MCP tool bridge", choices);
+					if (!selected) return;
+					requested = selected.split(" ", 1)[0]!;
+				}
+				if (!isToolBridgeMode(requested)) {
+					ctx.ui.notify("Usage: /antigravity-acp tool-bridge [ecosystem|all]", "warning");
+					return;
+				}
+				runtime.setToolBridgeMode(requested);
+				saveToolBridgeMode(requested);
+				ctx.ui.notify(`Antigravity Pi MCP tool bridge: ${requested}`, "info");
+				return;
+			}
+			if (command === "isolated-home" || command.startsWith("isolated-home ")) {
+				let requested = command.slice("isolated-home".length).trim().toLowerCase();
+				if (!requested) {
+					const choices = [
+						"on — isolate GEMINI_HOME so ~/.gemini/GEMINI.md and skills are not loaded twice (default)",
+						"off — inherit ~/.gemini directly",
+					];
+					const selected = await ctx.ui.select("Antigravity isolated GEMINI_HOME", choices);
+					if (!selected) return;
+					requested = selected.split(" ", 1)[0]!;
+				}
+				if (requested !== "on" && requested !== "off") {
+					ctx.ui.notify("Usage: /antigravity-acp isolated-home [on|off]", "warning");
+					return;
+				}
+				const enabled = requested === "on";
+				runtime.setIsolatedGeminiHome(enabled);
+				saveIsolatedGeminiHome(enabled);
+				ctx.ui.notify(`Antigravity isolated GEMINI_HOME: ${requested} (applies to new connections)`, "info");
+				return;
+			}
 			const verbose = command === "doctor --verbose";
 			if (command !== "doctor" && command !== "status" && !verbose) {
 				ctx.ui.notify(
-					"Usage: /antigravity-acp [setup|doctor|status|quota|update|updates|logout|account|qualify|permissions|tool-activity]",
+					"Usage: /antigravity-acp [setup|doctor|status|quota|update|updates|logout|account|qualify|permissions|tool-activity|tool-bridge|isolated-home]",
 					"warning",
 				);
 				return;
@@ -248,6 +312,8 @@ export function registerAntigravityAcp(pi: ExtensionAPI, connectionFactory?: Ant
 					`Credential storage (preflight): ${describeCredentialStorage()}`,
 					`Requested permission mode: ${permissionModeLabel(snapshot.permissionMode)}`,
 					`Tool activity mode: ${snapshot.toolActivityMode}`,
+					`Tool bridge mode: ${snapshot.toolBridgeMode}`,
+					`Isolated GEMINI_HOME: ${snapshot.isolatedGeminiHome ? "on" : "off"}`,
 					`Active bindings: ${snapshot.bindings}`,
 					formatMetrics(snapshot.metrics),
 					...snapshot.processes.flatMap((item) => [
@@ -261,6 +327,15 @@ export function registerAntigravityAcp(pi: ExtensionAPI, connectionFactory?: Ant
 		},
 	};
 	pi.registerCommand("antigravity-acp", commandDefinition);
+	// Each subcommand also gets its own slash command, so `/antigravity-acp:quota`
+	// is a direct invocation instead of `/antigravity-acp quota`. The original
+	// command and its subcommand arguments keep working.
+	for (const { name, description } of COLON_COMMANDS) {
+		pi.registerCommand(`antigravity-acp:${name}`, {
+			description,
+			handler: (args, ctx) => commandDefinition.handler(args.trim() ? `${name} ${args.trim()}` : name, ctx),
+		});
+	}
 	pi.registerCommand("gemini-acp", {
 		...commandDefinition,
 		description: "Deprecated alias for /antigravity-acp",
