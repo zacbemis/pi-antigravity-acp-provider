@@ -86,6 +86,7 @@ interface Binding {
 	session: AcpNewSessionResponse;
 	mode: PermissionMode;
 	modeId: string;
+	pendingMode?: { mode: PermissionMode; modeId: string } | undefined;
 	instructionsFingerprint: string | undefined;
 	needsReconstruction: boolean;
 	modelId: string;
@@ -452,14 +453,20 @@ export class AntigravityRuntime {
 				// Never change policy under an executing turn or leave an unsupported session alive.
 				const modeId = permissionModeId(binding.connection.getSessionState(binding.session.sessionId), mode);
 				if (!binding.turnCompletion && modeId !== undefined) {
+					binding.pendingMode = { mode, modeId };
 					try {
 						await binding.connection.setMode(binding.session.sessionId, modeId);
-						if (confirmsPermissionMode(binding.connection.getSessionState(binding.session.sessionId), mode, modeId)) {
+						if (this.resolvedBindings.has(binding) && confirmsPermissionMode(binding.connection.getSessionState(binding.session.sessionId), mode, modeId)) {
 							binding.mode = mode;
 							binding.modeId = modeId;
 							return;
 						}
 					} catch { /* Close below; the next turn must negotiate again. */ }
+					finally {
+						if (binding.pendingMode?.mode === mode && binding.pendingMode.modeId === modeId) {
+							binding.pendingMode = undefined;
+						}
+					}
 				}
 				await this.invalidateBinding(binding);
 			}));
@@ -1119,8 +1126,9 @@ export class AntigravityRuntime {
 
 	private consumeUpdate(binding: Binding | undefined, notification: SessionNotification): void {
 		if (!binding || notification.sessionId !== binding.session.sessionId) return;
+		const expected = binding.pendingMode ?? { mode: binding.mode, modeId: binding.modeId };
 		if ((notification.update.sessionUpdate === "config_option_update" || notification.update.sessionUpdate === "current_mode_update") &&
-			this.confirmedMode(binding) !== this.permissionMode) {
+			this.confirmedMode(binding, expected) !== this.permissionMode) {
 			binding.writer?.fail(new AntigravityAcpError("protocol", "Antigravity changed the permission mode unexpectedly; session closed"), false);
 			void this.invalidateBinding(binding).catch(() => undefined);
 			return;
@@ -1218,9 +1226,9 @@ export class AntigravityRuntime {
 		});
 	}
 
-	private confirmedMode(binding: Binding): string | undefined {
-		return confirmsPermissionMode(binding.connection.getSessionState(binding.session.sessionId), binding.mode, binding.modeId)
-			? binding.mode : undefined;
+	private confirmedMode(binding: Binding, expected = { mode: binding.mode, modeId: binding.modeId }): string | undefined {
+		return confirmsPermissionMode(binding.connection.getSessionState(binding.session.sessionId), expected.mode, expected.modeId)
+			? expected.mode : undefined;
 	}
 
 	private noteContinuationInstructions(binding: Binding, context: Context): void {

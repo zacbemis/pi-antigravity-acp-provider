@@ -209,7 +209,13 @@ for await (const line of rl) {
 			if (!qualifiedModelRejected || ["auto", "gemini-test"].includes(params.value)) model = params.value;
 		} else if (params.configId === "thinking-level-selector") effort = params.value;
 		else if (params.configId === "permission-selector") {
-			if (scenario !== "config-options-ignored-mode") mode = params.value;
+			if (scenario !== "config-options-ignored-mode") {
+				mode = params.value;
+				if (process.env.FAKE_AGENT_EMIT_MODE_UPDATES === "1") {
+					send({ jsonrpc: "2.0", method: "session/update", params: { sessionId: params.sessionId,
+						update: { sessionUpdate: "config_option_update", configOptions: sessionConfigOptions() } } });
+				}
+			}
 		}
 		else {
 			send({ jsonrpc: "2.0", id, error: { code: -32602, message: "Unknown selector" } });
@@ -232,6 +238,10 @@ for await (const line of rl) {
 			continue;
 		}
 		mode = params.modeId;
+		if (process.env.FAKE_AGENT_EMIT_MODE_UPDATES === "1") {
+			send({ jsonrpc: "2.0", method: "session/update", params: { sessionId: params.sessionId,
+				update: { sessionUpdate: "current_mode_update", currentModeId: mode } } });
+		}
 		send({ jsonrpc: "2.0", id, result: {} });
 	} else if (method === "session/prompt") {
 		const text = params.prompt.filter((block) => block.type === "text").map((block) => block.text).join("\n");

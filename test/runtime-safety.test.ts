@@ -31,14 +31,14 @@ function setup(
 	scenario?: string,
 	mode: PermissionMode = "yolo",
 	store?: AcpSessionStore,
-	runtimeOptions?: { maxBindings?: number; idleMs?: number; modeIds?: string[]; restoredModeIds?: string[] },
+	runtimeOptions?: { maxBindings?: number; idleMs?: number; modeIds?: string[]; restoredModeIds?: string[]; emitModeUpdates?: boolean },
 ) {
 	const root = fs.mkdtempSync(path.join(os.tmpdir(), "acp-runtime-safety-")); roots.push(root);
 	const log = path.join(root, "calls.jsonl"); fs.writeFileSync(log, "");
 	const connections: AntigravityAcpConnection[] = [];
 	const runtime = new AntigravityRuntime((options) => {
 		const connection = new AntigravityAcpConnection({ ...options, command: process.execPath,
-			args: [fakeAgent, ...(scenario ? [scenario] : [])], env: { ...options.env, FAKE_AGENT_LOG_FILE: log, FAKE_AGENT_MODE_IDS: runtimeOptions?.modeIds?.join(","), FAKE_AGENT_RESTORED_MODE_IDS: runtimeOptions?.restoredModeIds?.join(",") } });
+			args: [fakeAgent, ...(scenario ? [scenario] : [])], env: { ...options.env, FAKE_AGENT_LOG_FILE: log, FAKE_AGENT_MODE_IDS: runtimeOptions?.modeIds?.join(","), FAKE_AGENT_RESTORED_MODE_IDS: runtimeOptions?.restoredModeIds?.join(","), ...(runtimeOptions?.emitModeUpdates ? { FAKE_AGENT_EMIT_MODE_UPDATES: "1" } : {}) } });
 		connections.push(connection); return connection;
 	}, mode, store, runtimeOptions);
 	runtimes.push(runtime);
@@ -156,13 +156,18 @@ describe("host permission mode negotiation", () => {
 		expect(entries().some((entry) => entry.method === "session/prompt")).toBe(false);
 	});
 
-	it("changes a warm session to the alias and back to default", async () => {
-		const { runtime } = setup("config-options", "default", undefined, { modeIds: hostModes });
+	it.each([undefined, "config-options"])("changes a warm session to the alias and back to default with update notifications (%s)", async (scenario) => {
+		const root = fs.mkdtempSync(path.join(os.tmpdir(), "acp-warm-mode-update-")); roots.push(root);
+		const store = new AcpSessionStore(path.join(root, "sessions.json"));
+		const { runtime, connections } = setup(scenario, "default", store, { modeIds: hostModes, emitModeUpdates: true });
 		await turn(runtime, [user("hello")]);
+		const pid = (await runtime.snapshot()).processes[0]?.pid;
 		await runtime.setPermissionMode("auto_edit");
-		expect((await runtime.snapshot()).processes[0]).toMatchObject({ confirmedPermissionMode: "auto_edit", confirmedAcpModeId: "accept-edits" });
+		expect((await runtime.snapshot()).processes[0]).toMatchObject({ pid, alive: true, confirmedPermissionMode: "auto_edit", confirmedAcpModeId: "accept-edits" });
+		expect(store.get("safety")).toBeDefined();
 		await runtime.setPermissionMode("default");
-		expect((await runtime.snapshot()).processes[0]?.confirmedAcpModeId).toBe("default");
+		expect((await runtime.snapshot()).processes[0]).toMatchObject({ pid, alive: true, confirmedPermissionMode: "default", confirmedAcpModeId: "default" });
+		expect(connections).toHaveLength(1);
 	});
 
 	it("rejects an ignored alias selection", async () => {
