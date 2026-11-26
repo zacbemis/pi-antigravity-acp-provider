@@ -199,7 +199,7 @@ for await (const line of rl) {
 		send({
 			jsonrpc: "2.0",
 			id,
-			result: modern ? { configOptions: sessionConfigOptions() } : {
+			result: modern ? { configOptions: sessionConfigOptions(true) } : {
 				modes: sessionModes(true),
 				models: { currentModelId: model, availableModels: [] },
 			},
@@ -557,10 +557,15 @@ function sessionModes(restored = false) {
 	if (scenario === "no-mode-metadata") return undefined;
 	const unavailable = scenario === "no-auto-edit-mode" ? "auto_edit"
 		: scenario === "no-default-mode" || (restored && scenario === "no-default-on-restore") ? "default" : undefined;
-	return { currentModeId: mode, availableModes: ["default", "auto_edit", "yolo"].filter((id) => id !== unavailable).map((id) => ({ id, name: id })) };
+	return { currentModeId: mode, availableModes: permissionIds(restored).filter((id) => id !== unavailable).map((id) => ({ id, name: id })) };
 }
 
-function sessionConfigOptions() {
+function permissionIds(restored = false) {
+	const configured = (restored ? process.env.FAKE_AGENT_RESTORED_MODE_IDS : undefined) ?? process.env.FAKE_AGENT_MODE_IDS;
+	return configured ? configured.split(",") : ["default", "auto_edit", "yolo"];
+}
+
+function sessionConfigOptions(restored = false) {
 	return [
 		{ id: "model-selector", name: "Model", category: "model", type: "select", currentValue: model,
 			options: [{ group: "google", name: "Google", options: [
@@ -571,7 +576,7 @@ function sessionConfigOptions() {
 				currentValue: effort, options: ["low", "medium", "high"].map((value) => ({ value, name: value })) }]
 			: []),
 		{ id: "permission-selector", name: "Permissions", category: "mode", type: "select", currentValue: mode,
-			options: ["default", "auto_edit", "yolo"].map((value) => ({ value, name: value })) },
+			options: permissionIds(restored).map((value) => ({ value, name: value })) },
 	];
 }
 

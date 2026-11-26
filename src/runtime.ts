@@ -28,8 +28,9 @@ import { AntigravityAcpConnection, type AntigravityConnectionOptions } from "./a
 import { providerAcpDirectory, providerAcpEnvironment } from "./acp/credential-storage.js";
 import { abortError, AntigravityAcpError, errorMessage } from "./acp/errors.js";
 import { quotaExhaustion } from "./acp/quota.js";
+import { confirmsPermissionMode, permissionModeId, unsupportedPermissionMode } from "./acp/permission-policy.js";
 import { AcpSessionStore } from "./acp/session-store.js";
-import { sessionModels, sessionModes, type AcpModelInfo, type AcpNewSessionResponse, type SessionState } from "./acp/session-state.js";
+import { sessionModels, sessionModes, type AcpModelInfo, type AcpNewSessionResponse } from "./acp/session-state.js";
 import { parseUsageQuota, type AntigravityQuotaSnapshot } from "./acp/usage-quota.js";
 import {
 	DEFAULT_BINDING_IDLE_MS,
@@ -84,6 +85,7 @@ interface Binding {
 	initialize: InitializeResponse;
 	session: AcpNewSessionResponse;
 	mode: PermissionMode;
+	modeId: string;
 	instructionsFingerprint: string | undefined;
 	needsReconstruction: boolean;
 	modelId: string;
@@ -146,6 +148,7 @@ export interface RuntimeSnapshot {
 		sessionId: string;
 		modelId: string;
 		confirmedPermissionMode: PermissionMode;
+		confirmedAcpModeId: string;
 		omittedTools: ToolOmission[];
 		alive: boolean;
 		waitingForPermission: boolean;
@@ -447,10 +450,15 @@ export class AntigravityRuntime {
 			await Promise.all([...this.resolvedBindings].map(async (binding) => {
 				if (binding.mode === mode && this.confirmedMode(binding) === mode) return;
 				// Never change policy under an executing turn or leave an unsupported session alive.
-				if (!binding.turnCompletion && supportsMode(binding.connection.getSessionState(binding.session.sessionId), mode)) {
+				const modeId = permissionModeId(binding.connection.getSessionState(binding.session.sessionId), mode);
+				if (!binding.turnCompletion && modeId !== undefined) {
 					try {
-						await binding.connection.setMode(binding.session.sessionId, mode);
-						if (this.confirmedMode(binding) === mode) { binding.mode = mode; return; }
+						await binding.connection.setMode(binding.session.sessionId, modeId);
+						if (confirmsPermissionMode(binding.connection.getSessionState(binding.session.sessionId), mode, modeId)) {
+							binding.mode = mode;
+							binding.modeId = modeId;
+							return;
+						}
 					} catch { /* Close below; the next turn must negotiate again. */ }
 				}
 				await this.invalidateBinding(binding);
@@ -484,6 +492,7 @@ export class AntigravityRuntime {
 					sessionId: binding.session.sessionId,
 					modelId: binding.modelId,
 					confirmedPermissionMode: binding.mode,
+					confirmedAcpModeId: binding.modeId,
 					omittedTools: binding.omittedTools,
 					alive: binding.connection.process.alive,
 					waitingForPermission: binding.permission !== undefined,
@@ -951,12 +960,13 @@ export class AntigravityRuntime {
 			session ??= await connection.newSession(cwd, signal, mcpServers);
 			this.assertSessionEpoch(key, epoch, sessionEpoch);
 			const mode = this.permissionMode;
-			if (!supportsMode(session, mode)) {
+			const modeId = permissionModeId(session, mode);
+			if (modeId === undefined) {
 				if (piSessionId) this.sessionStore?.remove(piSessionId);
-				throw new AntigravityAcpError("protocol", `Antigravity ${restored ? "restored" : "new"} session did not advertise permission mode '${mode}'; refusing to prompt`);
+				throw new AntigravityAcpError("protocol", `Antigravity ${restored ? "restored" : "new"} session ${unsupportedPermissionMode(session, mode)}`);
 			}
-			if (sessionModes(session)?.currentModeId !== mode) await connection.setMode(session.sessionId, mode, signal);
-			if (sessionModes(connection.getSessionState(session.sessionId))?.currentModeId !== mode) {
+			if (sessionModes(session)?.currentModeId !== modeId) await connection.setMode(session.sessionId, modeId, signal);
+			if (!confirmsPermissionMode(connection.getSessionState(session.sessionId), mode, modeId)) {
 				throw new AntigravityAcpError("protocol", "Antigravity did not confirm the requested permission mode");
 			}
 			const currentModel = sessionModels(session)?.currentModelId;
@@ -971,6 +981,7 @@ export class AntigravityRuntime {
 				initialize,
 				session,
 				mode,
+				modeId,
 				instructionsFingerprint: undefined,
 				needsReconstruction: false,
 				modelId: acpModelId,
@@ -1208,7 +1219,8 @@ export class AntigravityRuntime {
 	}
 
 	private confirmedMode(binding: Binding): string | undefined {
-		return sessionModes(binding.connection.getSessionState(binding.session.sessionId))?.currentModeId;
+		return confirmsPermissionMode(binding.connection.getSessionState(binding.session.sessionId), binding.mode, binding.modeId)
+			? binding.mode : undefined;
 	}
 
 	private noteContinuationInstructions(binding: Binding, context: Context): void {
@@ -1307,10 +1319,6 @@ function adaptPromptToCapabilities(parts: PromptParts, initialize: InitializeRes
 		output.push(block);
 	}
 	return { ...parts, prompt: output };
-}
-
-function supportsMode(session: SessionState, mode: PermissionMode): boolean {
-	return sessionModes(session)?.availableModes.some((candidate) => candidate.id === mode) === true;
 }
 
 function permissionView(permission: PendingPermission): PermissionView {
