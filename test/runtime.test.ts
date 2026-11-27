@@ -349,6 +349,29 @@ describe("AntigravityRuntime", () => {
 		}
 	});
 
+	it.each(["abort", "close"])("releases a parked native question on %s", async (operation) => {
+		const runtime = new AntigravityRuntime(
+			(options) => new AntigravityAcpConnection({ ...options, command: process.execPath, args: [fakeAgent] }),
+		);
+		const controller = new AbortController();
+		try {
+			const writer = runtime.stream(model, { messages: [{ role: "user", content: "native question", timestamp: 1 }] }, {
+				sessionId: "native-question", signal: controller.signal,
+			});
+			const first = await writer.stream.result();
+			const call = first.content.find((block) => block.type === "toolCall");
+			if (call?.type !== "toolCall") throw new Error("missing native question");
+			const form = runtime.getQuestion(call.id)!;
+			form.message = "mutated";
+			expect(runtime.getQuestion(call.id)?.message).toBe("The agent has a question.");
+			if (operation === "abort") controller.abort();
+			else await runtime.closeSession("native-question");
+			await vi.waitFor(() => expect(runtime.getQuestion(call.id)).toBeUndefined());
+		} finally {
+			await runtime.close();
+		}
+	});
+
 	it("parks a permission request and resumes it from a Pi tool result", async () => {
 		const runtime = new AntigravityRuntime(
 			(options) => new AntigravityAcpConnection({ ...options, command: process.execPath, args: [fakeAgent] }),

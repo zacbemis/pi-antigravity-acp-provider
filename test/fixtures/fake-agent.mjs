@@ -19,6 +19,8 @@ let model = "auto";
 let mode = "default";
 let effort = "high";
 let permissionPromptId;
+let elicitationPromptId;
+let formElicitation = false;
 let hangingPromptId;
 let bridgePromptId;
 let mcpServer;
@@ -33,6 +35,10 @@ for await (const line of rl) {
 	if (!line.trim()) continue;
 	const message = JSON.parse(line);
 	if (!("id" in message)) {
+		if (message.method === "session/cancel" && elicitationPromptId !== undefined) {
+			send({ jsonrpc: "2.0", id: elicitationPromptId, result: { stopReason: "cancelled" } });
+			elicitationPromptId = undefined;
+		}
 		if (message.method === "session/cancel" && hangingPromptId !== undefined) {
 			send({ jsonrpc: "2.0", id: hangingPromptId, result: { stopReason: "cancelled" } });
 			hangingPromptId = undefined;
@@ -50,7 +56,15 @@ for await (const line of rl) {
 	const { id, method, params } = message;
 	if (process.env.FAKE_AGENT_LOG_FILE && method) fs.appendFileSync(process.env.FAKE_AGENT_LOG_FILE,
 		JSON.stringify({ method, ...(["initialize", "session/new", "session/load", "session/resume"].includes(method) ? { params } : {}), ...(method === "session/prompt" ? { prompt: params.prompt, mode } : {}), ...(method === "session/set_mode" ? { modeId: params.modeId } : {}) }) + "\n");
-	if (id === "mixed-permission" && method === undefined) {
+	if (id === "question-1" && method === undefined) {
+		if (elicitationPromptId === undefined) continue;
+		const answer = message.result?.action === "accept" ? message.result.content?.q1 : message.result?.action;
+		send({ jsonrpc: "2.0", method: "session/update", params: { sessionId: "fake-session", update: {
+			sessionUpdate: "agent_message_chunk", content: { type: "text", text: `Answer: ${answer}` },
+		} } });
+		send({ jsonrpc: "2.0", id: elicitationPromptId, result: { stopReason: "end_turn" } });
+		elicitationPromptId = undefined;
+	} else if (id === "mixed-permission" && method === undefined) {
 		resolveMixedPermission?.(message.result?.outcome?.optionId ?? message.result?.outcome?.outcome ?? "cancelled");
 		resolveMixedPermission = undefined;
 	} else if (id === "exhausted-permission" && method === undefined) {
@@ -70,6 +84,7 @@ for await (const line of rl) {
 		send({ jsonrpc: "2.0", id: permissionPromptId, result: { stopReason: "end_turn" } });
 		permissionPromptId = undefined;
 	} else if (method === "initialize") {
+		formElicitation = params.clientCapabilities?.elicitation?.form !== undefined;
 		if (scenario === "diagnostic-signals") {
 			process.stderr.write("HTTP 429 RESOURCE_EXHAUSTED retrying in 2s authorization: Bearer TEST_SECRET prompt=PRIVATE_PROMPT\nSyntaxWarning: PRIVATE_FILE_CONTENT\n");
 		}
@@ -304,6 +319,23 @@ for await (const line of rl) {
 		const notify = (update) => send({ jsonrpc: "2.0", method: "session/update", params: { sessionId: params.sessionId, update } });
 		// agy reports the context size after each inference; setup sends used: 0.
 		const usageUpdate = (used) => notify({ sessionUpdate: "usage_update", used, size: 1048576 });
+		if (text === "native question") {
+			elicitationPromptId = id;
+			if (!formElicitation) {
+				// CLI 1.5.13 falls back to chat and keeps the original prompt open.
+				notify({ sessionUpdate: "agent_message_chunk", content: { type: "text", text: "Pick a color\n- [1] Red\n- [2] Blue" } });
+				continue;
+			}
+			// Captured from CLI 1.5.13's native ask_question, not a Pi MCP tool.
+			send({ jsonrpc: "2.0", id: "question-1", method: "elicitation/create", params: {
+				sessionId: params.sessionId, toolCallId: "ask-color", mode: "form", message: "The agent has a question.",
+				requestedSchema: { type: "object", properties: {
+					q1: { type: "string", title: "Pick a color", oneOf: [{ const: "1", title: "Red" }, { const: "2", title: "Blue" }] },
+					q1_other: { type: "string", title: "Other", description: "Optional free-form answer to: Pick a color" },
+				} },
+			} });
+			continue;
+		}
 		if (text === "emit tool activity") {
 			notify({ sessionUpdate: "agent_thought_chunk", content: { type: "text", text: "Reasoning" } });
 			notify({

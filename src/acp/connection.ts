@@ -3,6 +3,8 @@ import {
 	methods,
 	PROTOCOL_VERSION,
 	type ClientConnection,
+	type CreateElicitationRequest,
+	type CreateElicitationResponse,
 	RequestError,
 	type AuthenticateRequest,
 	type InitializeResponse,
@@ -36,6 +38,7 @@ const DEFAULT_OPERATION_TIMEOUT_MS = 120_000;
 export interface AntigravityConnectionHandlers {
 	onUpdate?: (notification: SessionNotification) => void | Promise<void>;
 	onPermission?: (request: RequestPermissionRequest) => Promise<RequestPermissionResponse>;
+	onElicitation?: (request: CreateElicitationRequest) => Promise<CreateElicitationResponse>;
 }
 
 export interface AntigravityConnectionOptions extends AntigravityProcessOptions {
@@ -127,6 +130,16 @@ export class AntigravityAcpConnection {
 					release?.();
 				}
 			})
+			.onRequest(methods.client.elicitation.create, async ({ params: request }) => {
+				const sessionId = "sessionId" in request && typeof request.sessionId === "string" ? request.sessionId : undefined;
+				if (sessionId) this.exhaustion.get(sessionId)?.noteProgress();
+				const release = sessionId ? this.watchdogs.get(sessionId)?.hold() : undefined;
+				try {
+					return (await this.handlers.onElicitation?.(request)) ?? { action: "cancel" };
+				} finally {
+					release?.();
+				}
+			})
 			.onNotification(methods.client.session.update, async ({ params: notification }) => {
 				this.watchdogs.get(notification.sessionId)?.noteUpdate(notification);
 				this.exhaustion.get(notification.sessionId)?.noteProgress();
@@ -147,6 +160,7 @@ export class AntigravityAcpConnection {
 				clientCapabilities: {
 					fs: { readTextFile: false, writeTextFile: false },
 					terminal: false,
+					...(this.handlers.onElicitation ? { elicitation: { form: {} } } : {}),
 				},
 				clientInfo: {
 					name: "pi-antigravity-acp-provider",

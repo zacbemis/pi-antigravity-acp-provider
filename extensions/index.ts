@@ -29,6 +29,7 @@ import {
 	ACP_SDK_VERSION,
 	PACKAGE_VERSION,
 	QUOTA_REQUEST_CHANNEL,
+	QUESTION_TOOL_NAME,
 } from "../src/constants.js";
 import type { AntigravityQuotaSnapshot } from "../src/acp/usage-quota.js";
 import { PROVIDER_ID } from "../src/models.js";
@@ -41,6 +42,7 @@ import {
 import { acquireSharedRuntime, releaseSharedRuntime } from "../src/shared-runtime.js";
 import { runSetupWizard } from "../src/wizard.js";
 import { completeAntigravityArguments } from "./command-completions.js";
+import { answerQuestionForm } from "./elicitation.js";
 
 export type { AntigravityQuotaSnapshot } from "../src/acp/usage-quota.js";
 
@@ -118,6 +120,20 @@ export function registerAntigravityAcp(pi: ExtensionAPI, connectionFactory?: Ant
 				],
 				details,
 			};
+		},
+	});
+
+	pi.registerTool({
+		name: QUESTION_TOOL_NAME,
+		label: "Antigravity Question",
+		description: "Answers a question emitted by Antigravity ACP. Only request IDs emitted by the provider are valid.",
+		parameters: Type.Object({ requestId: Type.String({ minLength: 1, maxLength: 128 }) }),
+		executionMode: "sequential",
+		async execute(_toolCallId, params, signal, _onUpdate, ctx) {
+			const form = runtime.getQuestion(params.requestId);
+			if (!form) throw new Error("This Antigravity question is missing, expired, or already answered");
+			const response = ctx.hasUI ? await answerQuestionForm(form, ctx.ui, signal) : { action: "cancel" as const };
+			return { content: [{ type: "text", text: JSON.stringify(response) }], details: response };
 		},
 	});
 

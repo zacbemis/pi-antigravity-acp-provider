@@ -8,6 +8,7 @@ A [Pi](https://github.com/earendil-works/pi) provider for **Google Antigravity**
 - Uses ACP protocol v1 over the official TypeScript SDK (`@agentclientprotocol/sdk`).
 - Supports streaming, cancellation, usage/quota reporting, persisted session restoration, and cost estimation from reference catalog rates.
 - Bridges compatible Pi tools over an authenticated loopback MCP server; `doctor`/`status` lists any omitted tools and reasons.
+- Answers native Antigravity questions through Pi selectors and text inputs, returning the answer to the same running ACP prompt. Dismissed, blocked, or headless questions are cancelled instead of leaving the agent waiting.
 - Supports persisted `default`, `auto-edit`, and `yolo` permission modes (default: `yolo`) with a single-use, fail-closed Pi permission broker for prompting modes.
 - Verifies managed ACP runtime installs and updates against an Ed25519-signed catalog (`automatic`, `notify`, or `manual` update modes).
 - Supports interactive browser OAuth, automatic SSH/headless OAuth relay, and `GEMINI_API_KEY` authentication.
