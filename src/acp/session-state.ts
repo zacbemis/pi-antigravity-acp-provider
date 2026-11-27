@@ -62,64 +62,136 @@ export function selectorValues(option: SelectOption): SessionConfigSelectOption[
 	return option.options.flatMap((entry) => "options" in entry ? entry.options : [entry]);
 }
 
-/** Reverse the selector cross-product used by discovery, including unknown
- * thought levels, without misinterpreting an exact native model ID. */
-export function splitSessionModelId(state: SessionState, modelId: string): { base: string; effort: string } | undefined {
-	const model = findSessionSelector(state, "model");
-	const thought = findSessionSelector(state, "thought_level");
-	if (!model || !thought) return undefined;
-	const models = selectorValues(model);
-	if (models.some((option) => option.value === modelId)) return undefined;
-	const levels = selectorValues(thought);
-	for (const base of models) {
-		const level = levels.find((option) => `${base.value}-${option.value}` === modelId);
-		if (level) return { base: base.value, effort: level.value };
+/** How a session applies one model ID: an exact `model` selector value, or a
+ * base value followed by a `thought_level` value. */
+interface ModelSelection {
+	/** `model` selector value; the whole ID when `effort` is absent. */
+	base: string;
+	/** `thought_level` value. */
+	effort?: string;
+}
+
+/** Every ID a session can select, keyed by exact ID, in discovery order. */
+type ModelInventory = Map<string, { info: AcpModelInfo; selection: ModelSelection }>;
+
+/** A value that already ends in a thought level names a whole ID. */
+function carriesLevel(id: string, levels: SessionConfigSelectOption[]): boolean {
+	return splitEffortSuffix(id) !== undefined ||
+		levels.some((option) => option.value.length > 0 && id.endsWith(`-${option.value}`));
+}
+
+/** Selector values that do not already carry a level. Only these take effort variants. */
+function basesOf(options: SessionConfigSelectOption[], levels: SessionConfigSelectOption[]): string[] {
+	return options.filter((option) => !carriesLevel(option.value, levels)).map((option) => option.value);
+}
+
+/** The selectors that produce `modelId`: a selector value verbatim, or the
+ * longest base value extended by a suffix. */
+function selectionFor(modelId: string, values: string[], bases: string[]): ModelSelection | undefined {
+	if (values.includes(modelId)) return { base: modelId };
+	let selection: ModelSelection | undefined;
+	for (const base of bases) {
+		if (modelId.startsWith(`${base}-`) && modelId.length > base.length + 1 && base.length > (selection?.base.length ?? 0)) {
+			selection = { base, effort: modelId.slice(base.length + 1) };
+		}
 	}
-	return undefined;
+	return selection;
+}
+
+/** The server's explicit `models` list, when the selectors vouch for it. Undefined
+ * on any disagreement, so a repeated, stale, base-only, or incomplete list falls
+ * back to the selectors instead of being trusted. */
+function legacyInventory(
+	legacy: AcpModelInfo[] | undefined,
+	values: string[],
+	bases: string[],
+	currentBase: string | undefined,
+	levels: string[],
+): ModelInventory | undefined {
+	if (!legacy) return undefined;
+	const inventory: ModelInventory = new Map();
+	for (const info of legacy) {
+		if (inventory.has(info.modelId)) return undefined;
+		const selection = selectionFor(info.modelId, values, bases);
+		if (!selection) return undefined;
+		if (selection.effort !== undefined && !levels.includes(selection.effort) && splitEffortSuffix(info.modelId)?.effort !== selection.effort) {
+			return undefined;
+		}
+		inventory.set(info.modelId, { info, selection });
+	}
+	// Each selector value is listed as itself or as its variants, never both or neither.
+	const whole = new Set<string>();
+	const variants = new Map<string, Set<string>>();
+	for (const { selection } of inventory.values()) {
+		if (selection.effort === undefined) whole.add(selection.base);
+		else variants.set(selection.base, (variants.get(selection.base) ?? new Set()).add(selection.effort));
+	}
+	const listedOnce = (value: string) => whole.has(value) !== variants.has(value);
+	if (!values.every(listedOnce)) return undefined;
+	// The thought selector offers the current model's levels, so the list must offer it exactly those.
+	if (currentBase !== undefined && levels.length > 0) {
+		const offered = variants.get(currentBase);
+		if (!offered || offered.size !== levels.length || !levels.every((level) => offered.has(level))) return undefined;
+	}
+	return inventory;
+}
+
+/** Cross-product of the selectors: a value that already carries a level is a
+ * whole ID; every other value is offered once per level. */
+function synthesizedInventory(options: SessionConfigSelectOption[], levels: SessionConfigSelectOption[]): ModelInventory {
+	const inventory: ModelInventory = new Map();
+	for (const model of options) {
+		if (levels.length === 0 || carriesLevel(model.value, levels)) {
+			inventory.set(model.value, { info: { modelId: model.value, name: model.name }, selection: { base: model.value } });
+			continue;
+		}
+		for (const level of levels) {
+			inventory.set(`${model.value}-${level.value}`, {
+				info: { modelId: `${model.value}-${level.value}`, name: `${model.name} (${level.name})` },
+				selection: { base: model.value, effort: level.value },
+			});
+		}
+	}
+	return inventory;
+}
+
+/** One inventory for discovery and selection. */
+function modelInventory(state: SessionState, selector: SelectOption, levels: SessionConfigSelectOption[]): ModelInventory {
+	const options = selectorValues(selector);
+	const bases = basesOf(options, levels);
+	const values = options.map((option) => option.value);
+	// Resolve a qualified current value to its base before checking its levels.
+	const current = selectionFor(selector.currentValue, values, bases)?.base;
+	const currentBase = current !== undefined && bases.includes(current) ? current : undefined;
+	return legacyInventory(state.models?.availableModels, values, bases, currentBase, levels.map((level) => level.value))
+		?? synthesizedInventory(options, levels);
+}
+
+/** Reverse the inventory used by discovery, including levels the current
+ * thought selector lacks, without misinterpreting a whole ID. */
+export function splitSessionModelId(state: SessionState, modelId: string): { base: string; effort: string } | undefined {
+	const selector = findSessionSelector(state, "model");
+	const thought = findSessionSelector(state, "thought_level");
+	if (!selector || !thought) return undefined;
+	const selection = modelInventory(state, selector, selectorValues(thought)).get(modelId)?.selection;
+	return selection?.effort === undefined ? undefined : { base: selection.base, effort: selection.effort };
 }
 
 export function sessionModels(state: SessionState): { currentModelId: string; availableModels: AcpModelInfo[] } | undefined {
 	const selector = findSessionSelector(state, "model");
 	if (!selector) return state.models ?? undefined;
-	const thoughtSelector = findSessionSelector(state, "thought_level");
-	const modelOptions = selectorValues(selector);
-	if (thoughtSelector) {
-		const thoughtOptions = selectorValues(thoughtSelector);
-		const qualified = (id: string) => splitEffortSuffix(id) !== undefined ||
-			thoughtOptions.some((option) => option.value.length > 0 && id.endsWith(`-${option.value}`));
-		if (thoughtOptions.length > 0 && modelOptions.some((option) => !qualified(option.value))) {
-			const currentModelId =
-				qualified(selector.currentValue) || !thoughtSelector.currentValue
-					? selector.currentValue
-					: `${selector.currentValue}-${thoughtSelector.currentValue}`;
-			// Live selectors are authoritative; retain legacy labels only for the
-			// same complete, duplicate-free inventory.
-			const synthesized = modelOptions.flatMap((modelOpt) =>
-				qualified(modelOpt.value)
-					? [{ modelId: modelOpt.value, name: modelOpt.name }]
-					: thoughtOptions.map((thoughtOpt) => ({
-							modelId: `${modelOpt.value}-${thoughtOpt.value}`,
-							name: `${modelOpt.name} (${thoughtOpt.name})`,
-						})),
-			);
-			const synthesizedIds = new Set(synthesized.map((m) => m.modelId));
-
-			const legacy = state.models?.availableModels;
-			const isLegacyCompatible =
-				legacy !== undefined &&
-				legacy.length === synthesizedIds.size &&
-				new Set(legacy.map((model) => model.modelId)).size === synthesizedIds.size &&
-				legacy.every((m) => synthesizedIds.has(m.modelId));
-
-			return {
-				currentModelId,
-				availableModels: isLegacyCompatible ? legacy : synthesized,
-			};
-		}
-	}
+	const thought = findSessionSelector(state, "thought_level");
+	const levels = thought ? selectorValues(thought) : [];
+	const bases = basesOf(selectorValues(selector), levels);
+	const inventory = modelInventory(state, selector, levels);
+	// Legacy currentModelId may be stale; derive this ID from the live selectors.
+	const level = bases.length > 0 && levels.length > 0 && !carriesLevel(selector.currentValue, levels)
+		? thought?.currentValue
+		: undefined;
+	const currentModelId = level ? `${selector.currentValue}-${level}` : selector.currentValue;
 	return {
-		currentModelId: selector.currentValue,
-		availableModels: modelOptions.map((option) => ({ modelId: option.value, name: option.name })),
+		currentModelId,
+		availableModels: [...inventory.values()].map((entry) => entry.info),
 	};
 }
 
