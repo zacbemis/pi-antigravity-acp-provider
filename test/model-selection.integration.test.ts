@@ -17,6 +17,18 @@ function connection(scenario: string, options: Partial<AntigravityConnectionOpti
 	return new AntigravityAcpConnection({ cwd: process.cwd(), ...options, command: process.execPath, args: [fixture, scenario] });
 }
 
+/** The fixture's request log: what the provider put on the wire. */
+function requestLog() {
+	const directory = fs.mkdtempSync(path.join(os.tmpdir(), "acp-selection-wire-"));
+	const file = path.join(directory, "requests.ndjson");
+	return {
+		env: { ...process.env, MODEL_SELECTION_AGENT_LOG_FILE: file },
+		requests: () => (fs.existsSync(file) ? fs.readFileSync(file, "utf8").trim().split("\n") : [])
+			.map((line) => JSON.parse(line) as { method: string; configId?: string; value?: string }),
+		dispose: () => fs.rmSync(directory, { recursive: true, force: true }),
+	};
+}
+
 // These tests use the actual ACP SDK/transport and runtime, not mocks of the
 // selector methods. The child reports the model it really used in each reply.
 describe("model selection integration", () => {
@@ -33,6 +45,45 @@ describe("model selection integration", () => {
 			expect(sessionModels(await acp.resumeSession(session.sessionId, process.cwd()))?.currentModelId).toBe("gemini-b-medium");
 			expect(sessionModels(await acp.loadSession(session.sessionId, process.cwd()))?.currentModelId).toBe("gemini-b-medium");
 		} finally { await acp.close(); }
+	});
+
+	// ACP 1.5.2: the thought selector offers only the current model's levels, and
+	// the draft session/set_model method is gone.
+	it("selects a tier the current thought selector lacks first, through two confirmed selector writes", async () => {
+		const log = requestLog();
+		const acp = connection("per-model", { env: log.env });
+		try {
+			const session = await acp.newSession(process.cwd());
+			expect(sessionModels(session)?.currentModelId).toBe("gemini-3.8-flash-high");
+			await acp.setModel(session.sessionId, "gemini-4-neon-xhigh");
+			expect(sessionModels(acp.getSessionState(session.sessionId))?.currentModelId).toBe("gemini-4-neon-xhigh");
+			expect(log.requests().filter((request) => !["initialize", "session/new"].includes(request.method))).toEqual([
+				{ method: "session/set_config_option", configId: "model", value: "gemini-4-neon" },
+				{ method: "session/set_config_option", configId: "thinking_level", value: "xhigh" },
+			]);
+		} finally { await acp.close(); log.dispose(); }
+	});
+
+	it("selects every ID of a per-model list and restores the session without the draft method", async () => {
+		const log = requestLog();
+		const acp = connection("per-model", { env: log.env });
+		try {
+			const session = await acp.newSession(process.cwd());
+			const discovered = sessionModels(session)!.availableModels;
+			expect(discovered.map((model) => model.modelId)).toEqual([
+				...["low", "medium", "high", "xhigh"].map((level) => `gemini-4-neon-${level}`),
+				...["gemini-4-carbon", "gemini-3.8-flash"].flatMap((base) => ["low", "medium", "high"].map((level) => `${base}-${level}`)),
+			]);
+			for (const model of discovered) {
+				await acp.setModel(session.sessionId, model.modelId);
+				expect(sessionModels(acp.getSessionState(session.sessionId))?.currentModelId).toBe(model.modelId);
+			}
+			await acp.setModel(session.sessionId, "gemini-3.8-flash-high");
+			expect(sessionModels(await acp.resumeSession(session.sessionId, process.cwd()))?.currentModelId).toBe("gemini-3.8-flash-high");
+			expect(sessionModels(await acp.loadSession(session.sessionId, process.cwd()))?.currentModelId).toBe("gemini-3.8-flash-high");
+			expect([...new Set(log.requests().map((request) => request.method))])
+				.toEqual(["initialize", "session/new", "session/set_config_option", "session/resume", "session/load"]);
+		} finally { await acp.close(); log.dispose(); }
 	});
 
 	it("prefers an exact native model ID to splitting a matching suffix", async () => {
@@ -137,6 +188,20 @@ describe("model selection integration", () => {
 				{ role: "user", content: "second", timestamp: 2 }] }, { sessionId: "warm-effort", reasoning: "high" }).stream.result();
 			expect(second.content).toEqual([{ type: "text", text: "gemini-b/high" }]);
 			expect((await runtime.snapshot()).processes[0]?.generation).toBe(generation);
+		} finally { await runtime.close(); }
+	});
+
+	it("publishes each tier the server lists for a model, and none it does not", async () => {
+		const runtime = new AntigravityRuntime((options) => connection("per-model", options));
+		const { provider } = createAntigravityProvider(runtime);
+		try {
+			await provider.refreshModels!({ allowNetwork: true, signal: new AbortController().signal,
+				credential: { type: "api_key", key: "test-key" }, publish: async ({ update }) => { update?.(); return true; } });
+			const tiers = (id: string) => Object.entries(provider.getModels().find((model) => model.id === id)!.thinkingLevelMap ?? {})
+				.filter(([, value]) => value).map(([level]) => level);
+			expect(tiers("gemini-4-neon")).toEqual(["low", "medium", "high", "xhigh"]);
+			expect(tiers("gemini-4-carbon")).toEqual(["low", "medium", "high"]);
+			expect(tiers("gemini-3.8-flash")).toEqual(["low", "medium", "high"]);
 		} finally { await runtime.close(); }
 	});
 
