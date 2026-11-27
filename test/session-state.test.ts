@@ -256,6 +256,7 @@ describe("per-model inventories", () => {
 		{ label: "base IDs only", list: bases.map((modelId) => ({ modelId, name: modelId })) },
 		{ label: "a model the selector no longer offers", list: [...listed(perModel), { modelId: "gemini-4-hydrogen-high", name: "Gemini 4 Hydrogen (High)" }] },
 		{ label: "an unknown suffix on a known base", list: [...listed(perModel), { modelId: "gemini-4-neon-pro", name: "Gemini 4 Neon Pro" }] },
+		{ label: "a compound unknown suffix on a known base", list: [...listed(perModel), { modelId: "gemini-4-neon-pro-high", name: "Gemini 4 Neon Pro High" }] },
 		{ label: "a selector model missing from the list", list: without("gemini-4-carbon-low", "gemini-4-carbon-medium", "gemini-4-carbon-high") },
 		{ label: "a repeated ID", list: [...listed(perModel), { modelId: "gemini-4-neon-xhigh", name: "Gemini 4 Neon (XHigh)" }] },
 		{ label: "the current model missing a level", list: without("gemini-3.8-flash-medium") },

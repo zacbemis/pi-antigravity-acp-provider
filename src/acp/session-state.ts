@@ -114,7 +114,7 @@ function legacyInventory(
 		if (inventory.has(info.modelId)) return undefined;
 		const selection = selectionFor(info.modelId, values, bases);
 		if (!selection) return undefined;
-		if (selection.effort !== undefined && !levels.includes(selection.effort) && splitEffortSuffix(info.modelId) === undefined) {
+		if (selection.effort !== undefined && !levels.includes(selection.effort) && splitEffortSuffix(info.modelId)?.effort !== selection.effort) {
 			return undefined;
 		}
 		inventory.set(info.modelId, { info, selection });
