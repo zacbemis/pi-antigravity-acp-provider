@@ -70,6 +70,23 @@ For API-key authentication, choose **Enter an API key** and then **Antigravity G
 
 The ACP server manages the Google token in a private file under `$PI_CODING_AGENT_DIR/antigravity-acp-provider/gemini/antigravity-acp/`. Pi's auth store keeps only a non-secret marker. Each Pi profile has its own login; this provider does not use `GEMINI_HOME`, the shared macOS Keychain entry, or credentials from other Antigravity clients. If you upgraded from a version that used the shared store, sign in again with `/login antigravity-acp`. The old store is left untouched: profile-level settings, hooks, skills, and ACP conversations from that store are not carried over. Reconfigure anything you still need in the new profile. Pi chat history is unchanged.
 
+### Using an externally installed Antigravity CLI
+
+The default authentication backend is `standalone`, with the profile-isolated store described above. To explicitly reuse the [Antigravity CLI's cached Google login](https://antigravity.google/docs/ide/extensions/acp), set both:
+
+```sh
+export AGY_ACP_BIN=/absolute/path/to/agy-acp-wrapper
+export PI_ANTIGRAVITY_ACP_AUTH_BACKEND=cli
+```
+
+The executable wrapper must launch `agy acp` (with `--process-per-session` for Pi's HTTP MCP bridge). Merely setting `AGY_ACP_BIN` does not change credential ownership. The provider verifies the CLI's ACP identity and never silently falls back to a managed standalone runtime in CLI-auth mode.
+
+Sign in once with `agy acp --login` in a terminal, then run `/login antigravity-acp` in Pi and choose Google login. In this mode Pi validates the existing CLI login by opening a session without model inference; it does not start a second browser flow or inspect/copy CLI tokens. Pi stores a non-secret marker scoped to this backend and launcher. Switching backends or launchers requires `/login` again. A marker is not proof of current access: subsequent ACP sessions still enforce authentication.
+
+**CLI credentials are shared, not isolated per Pi profile.** Close other Pi processes before switching accounts. Use `/logout` in the CLI to sign out or switch accounts, then `/login antigravity-acp` in Pi to validate that account and clear stale session bindings. Pi's `/logout` removes only its marker; `/antigravity-acp logout` closes ACP sessions and clears saved bindings, but deliberately leaves CLI credentials and standalone token files untouched. Doctor reports CLI ownership without claiming the cached login has been probed.
+
+CLI-auth mode currently supports cached Google login only, not Pi API keys or `GEMINI_API_KEY` fallback. Quota integration is unavailable; use `/usage` in the CLI. Permission modes must still be advertised and confirmed by the selected runtime; use `default` if it does not advertise `yolo`. This authentication adapter does not qualify every CLI-native feature or change permission policy. Restart/reload Pi after changing the backend or launcher.
+
 ### Model availability
 
 The model catalog comes from the official ACP server. ACP 1.4.x exposes model and thinking level as separate selectors; the provider combines them for discovery and confirms both when applying Pi's reasoning choice. If a model change only partially succeeds, the affected session is discarded before retrying, rather than reusing a stale model selection. The offline catalog keeps Gemini 3.8 Flash first; listing Argon does not establish account eligibility. The last successfully discovered catalog is saved in Pi's model store and restored at the next startup, before Pi resolves `enabledModels` and `--model` patterns, so newly advertised models stay selectable before the network refresh finishes. A successful model listing or selection is not an inference/access probe: newly listed models can still fail because of plan eligibility, staged rollout, or backend availability. As of October 13, 2026, Google's [Argon announcement](https://www.antigravity.google/blog/gemini-4-argon-in-google-antigravity) and [model availability table](https://www.antigravity.google/docs/models/) list Gemini 4 Argon for Google AI Ultra and eligible Enterprise subscriptions, not AI Pro. If it returns `Requested entity was not found`, check access in the official Antigravity app/CLI with the same account; do not guess alternate model IDs or assume the listing proves access. Use another advertised model while investigating.
@@ -77,6 +94,8 @@ The model catalog comes from the official ACP server. ACP 1.4.x exposes model an
 Pi 1.6.0 can synthesize a model for a CLI ID missing from its startup catalog, copying the thinking map from another model of the same provider. Background discovery updates `get_available_models`, but does not replace that already-selected model in `get_state`; `set_model` does. Neon is in the offline catalog for cold startup. For other IDs, the provider corrects stale thinking maps from an exact catalog match before streaming, and never uses another family's thinking map for an unknown `gemini-4-*` model.
 
 ### Switch Google accounts
+
+These instructions apply to the default standalone backend; CLI account handling is described above.
 
 Close other Pi processes using this profile, then run `/login antigravity-acp` and select the Google account you want. An explicit Google login clears the profile's previous cached token and ACP session bindings before opening Google sign-in. Normal Pi restarts still reuse the saved login. Manual/SSH login asks Google to show the account picker; if the browser flow defaults to the wrong account, use a private browser window with the manual flow.
 
@@ -125,6 +144,8 @@ pi.events.emit("antigravity-acp:quota:request", { reply: (result) => { /* ... */
 ```bash
 npm run check
 npm run test:real-acp  # initializes the installed Antigravity ACP server
+# With AGY_ACP_BIN set to a signed-in CLI wrapper:
+npm run test:live-cli  # validates cached CLI auth and a harmless Neon High prompt
 npm run test:live      # sends a real authenticated prompt
 npm run test:qualify   # live cancel, restore, MCP, model, and permission qualification
 npm run test:packed

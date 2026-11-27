@@ -9,8 +9,8 @@ import type {
 	SimpleStreamOptions,
 } from "@earendil-works/pi-ai";
 
-import { AntigravityAcpError } from "./acp/errors.js";
-import { hasSavedGoogleLogin, isGoogleLoginMarker, newGoogleLoginMarker } from "./auth.js";
+import { authenticationBackend } from "./acp/auth-backend.js";
+import { newGoogleLoginMarker, savedGoogleLogin } from "./auth.js";
 import { FALLBACK_MODELS, modelForAcpStream, projectModels, PROVIDER_ID, restoreModels } from "./models.js";
 import { AntigravityRuntime } from "./runtime.js";
 
@@ -29,7 +29,9 @@ export function createAntigravityProvider(runtime = new AntigravityRuntime()): A
 				name: "Google Antigravity (ACP)",
 				loginLabel: "Sign in with Google",
 				async login(interaction) {
-					interaction.notify({ type: "progress", message: "Starting Antigravity Google login…" });
+					interaction.notify({ type: "progress", message: authenticationBackend().kind === "cli"
+						? "Validating the Antigravity CLI's cached Google login…"
+						: "Starting Antigravity Google login…" });
 					await runtime.loginGoogle(
 						interaction.signal,
 						(message) => interaction.notify({ type: "progress", message }),
@@ -69,6 +71,9 @@ export function createAntigravityProvider(runtime = new AntigravityRuntime()): A
 			apiKey: {
 				name: "Antigravity Gemini API key",
 				async login(interaction) {
+					if (authenticationBackend().kind === "cli") {
+						throw new Error("The CLI backend uses its cached Google login. Choose Sign in with Google instead of API key.");
+					}
 					const key = await interaction.prompt({
 						type: "secret",
 						message: "Gemini API key",
@@ -82,11 +87,13 @@ export function createAntigravityProvider(runtime = new AntigravityRuntime()): A
 					return { type: "api_key", key: key.trim() };
 				},
 				async check({ ctx, credential }) {
+					if (authenticationBackend().kind === "cli") return undefined;
 					if (credential?.key) return { type: "api_key", source: "Pi auth store" };
 					if (await ctx.env("GEMINI_API_KEY")) return { type: "api_key", source: "GEMINI_API_KEY" };
 					return undefined;
 				},
 				async resolve({ ctx, credential }) {
+					if (authenticationBackend().kind === "cli") return undefined;
 					const key = credential?.key ?? (await ctx.env("GEMINI_API_KEY"));
 					if (key) {
 						return {
@@ -119,7 +126,7 @@ export function createAntigravityProvider(runtime = new AntigravityRuntime()): A
 						? savedGoogleLogin(context.credential.access)
 						: context.credential?.type === "api_key"
 							? context.credential.key
-							: process.env.GEMINI_API_KEY?.trim();
+							: authenticationBackend().kind === "standalone" ? process.env.GEMINI_API_KEY?.trim() : undefined;
 				if (!key) return;
 				discovered = projectModels(await runtime.discoverModels(key, context.signal));
 			} catch {
@@ -143,13 +150,6 @@ export function createAntigravityProvider(runtime = new AntigravityRuntime()): A
 		},
 	};
 	return { provider, runtime };
-}
-
-function savedGoogleLogin(marker: string): string {
-	if (!isGoogleLoginMarker(marker) || !hasSavedGoogleLogin()) {
-		throw new AntigravityAcpError("auth", "No saved Google login for this Pi profile. Run /login antigravity-acp.");
-	}
-	return marker;
 }
 
 function stream(

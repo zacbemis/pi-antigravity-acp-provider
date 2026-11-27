@@ -25,7 +25,7 @@ import {
 	type AntigravityAuthHealth,
 } from "./acp/antigravity.js";
 import { AntigravityAcpConnection, type AntigravityConnectionOptions } from "./acp/connection.js";
-import { providerAcpDirectory, providerAcpEnvironment } from "./acp/credential-storage.js";
+import { describeCredentialStorage, providerAcpDirectory } from "./acp/credential-storage.js";
 import { abortError, AntigravityAcpError, errorMessage } from "./acp/errors.js";
 import { quotaExhaustion } from "./acp/quota.js";
 import { AcpSessionStore } from "./acp/session-store.js";
@@ -39,7 +39,8 @@ import {
 } from "./constants.js";
 export { MANAGED_AUTH_MARKER, PERMISSION_RESULT_KIND, PERMISSION_TOOL_NAME } from "./constants.js";
 import { mapSessionUpdate } from "./acp/events.js";
-import { credentialIdentity, hasSavedGoogleLogin, isGoogleLoginMarker } from "./auth.js";
+import { authenticationBackend, authenticationEnvironment } from "./acp/auth-backend.js";
+import { credentialIdentity, hasSavedGoogleLogin, isGoogleLoginMarker, newGoogleLoginMarker, savedGoogleLogin } from "./auth.js";
 import { ensureAntigravityAcpReady } from "./acp/setup.js";
 import { HeadlessOAuthRelay, shouldUseHeadlessOAuth } from "./acp/headless-oauth.js";
 import {
@@ -259,6 +260,9 @@ export class AntigravityRuntime {
 	async quota(apiKey: string | undefined, signal?: AbortSignal): Promise<AntigravityQuotaSnapshot> {
 		this.assertActive();
 		if (signal?.aborted) throw abortError();
+		if (authenticationBackend().kind === "cli") {
+			throw new AntigravityAcpError("invalid_input", "Quota is not supported by the CLI backend. Use /usage in the Antigravity CLI.");
+		}
 		const credentialId = credentialIdentity(apiKey);
 		if (this.quotaCache?.credentialId === credentialId && Date.now() - this.quotaCache.snapshot.at < QUOTA_CACHE_MS) {
 			return this.quotaCache.snapshot;
@@ -330,6 +334,16 @@ export class AntigravityRuntime {
 	): Promise<void> {
 		this.assertActive();
 		signal?.throwIfAborted();
+		if (authenticationBackend().kind === "cli") {
+			await this.logout();
+			try {
+				await this.discoverModels(newGoogleLoginMarker(), signal);
+			} catch (error) {
+				if (!(error instanceof AntigravityAcpError) || error.code !== "auth") throw error;
+				throw new AntigravityAcpError("auth", `${errorMessage(error)} Run agy acp --login in a terminal if needed, then /login antigravity-acp to use that account.`, { cause: error });
+			}
+			return;
+		}
 		const epoch = this.bindingEpoch;
 		const env = { ...process.env };
 		delete env.GEMINI_API_KEY;
@@ -403,6 +417,9 @@ export class AntigravityRuntime {
 		onProgress?: (message: string) => void,
 	): Promise<void> {
 		this.assertActive();
+		if (authenticationBackend().kind === "cli") {
+			throw new AntigravityAcpError("auth", "The CLI backend uses its cached Google login. Run /login antigravity-acp instead of entering an API key.");
+		}
 		const epoch = this.bindingEpoch;
 		if (this.ensureAgent) await ensureAntigravityAcpReady(onProgress);
 		this.assertEpoch(epoch);
@@ -420,8 +437,22 @@ export class AntigravityRuntime {
 		}
 	}
 
-	inspectLocalAuth(): AntigravityAuthHealth {
-		return inspectAntigravityAuth(providerAcpDirectory());
+	inspectLocalAuth(): AntigravityAuthHealth | { status: "cli-managed (not probed)"; authType: string } {
+		return authenticationBackend().kind === "cli"
+			? { status: "cli-managed (not probed)", authType: "cached Google login" }
+			: inspectAntigravityAuth(providerAcpDirectory());
+	}
+
+	credentialStorageDescription(): string {
+		return authenticationBackend().kind === "cli"
+			? "Antigravity CLI-owned shared store; not isolated by Pi profile"
+			: describeCredentialStorage({ env: authenticationEnvironment() });
+	}
+
+	logoutDescription(): string {
+		return authenticationBackend().kind === "cli"
+			? "Closed ACP sessions and cleared Pi's saved session bindings. CLI credentials are unchanged: use /logout in the Antigravity CLI to sign out or switch accounts, and Pi's /logout to remove its sign-in record."
+			: "Cleared this Pi profile's Google login and saved ACP sessions. Use /logout to remove the Pi sign-in record, or /login antigravity-acp to choose another account.";
 	}
 
 	logout(): Promise<void> {
@@ -433,7 +464,7 @@ export class AntigravityRuntime {
 	private async resetAuthentication(): Promise<void> {
 		this.quotaCache = undefined;
 		await this.closeBindings();
-		clearAntigravityCredentials(providerAcpDirectory());
+		if (authenticationBackend().kind === "standalone") clearAntigravityCredentials(providerAcpDirectory());
 		this.sessionStore?.clear();
 	}
 
@@ -1224,8 +1255,13 @@ export class AntigravityRuntime {
 	private createConnection(options: AntigravityConnectionOptions, apiKey?: string): AntigravityAcpConnection {
 		this.assertActive();
 		if (this.logoutInFlight) throw new AntigravityAcpError("auth", "Antigravity ACP logout is in progress");
-		const env = providerAcpEnvironment(options.env);
-		if (apiKey && isGoogleLoginMarker(apiKey)) delete env.GEMINI_API_KEY;
+		const backend = authenticationBackend();
+		if (backend.kind === "cli" && apiKey && !isGoogleLoginMarker(apiKey)) {
+			throw new AntigravityAcpError("auth", "The CLI backend requires its cached Google login, not a Pi API key. Run /login antigravity-acp.");
+		}
+		if (apiKey && isGoogleLoginMarker(apiKey)) savedGoogleLogin(apiKey);
+		const env = authenticationEnvironment(options.env);
+		if (backend.kind === "cli" || (apiKey && isGoogleLoginMarker(apiKey))) delete env.GEMINI_API_KEY;
 		const connection = this.connectionFactory({ ...options, env });
 		this.activeConnections.add(connection);
 		void connection.process.exited.then(() => this.activeConnections.delete(connection)).catch(() => undefined);
@@ -1279,6 +1315,9 @@ async function authenticateForCredential(
 	apiKey: string | undefined,
 	signal?: AbortSignal,
 ): Promise<void> {
+	if (authenticationBackend().kind === "cli" && initialize.agentInfo?.name !== "Antigravity ACP Server") {
+		throw new AntigravityAcpError("auth", "CLI authentication requires the Antigravity CLI ACP server. Check AGY_ACP_BIN or select the standalone authentication backend.");
+	}
 	if (!apiKey || isGoogleLoginMarker(apiKey)) return;
 	const method = initialize.authMethods?.find((candidate) => {
 		const meta = candidate._meta as Record<string, unknown> | null | undefined;

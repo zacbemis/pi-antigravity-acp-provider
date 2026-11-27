@@ -70,7 +70,7 @@ for await (const line of rl) {
 		send({ jsonrpc: "2.0", id: permissionPromptId, result: { stopReason: "end_turn" } });
 		permissionPromptId = undefined;
 	} else if (method === "initialize") {
-		if (scenario === "initialize-timeout") continue;
+		if (scenario === "initialize-timeout" || scenario === "cli-initialize-timeout") continue;
 		if (scenario === "malformed-output") {
 			process.stdout.write("not-json\n");
 			continue;
@@ -83,7 +83,7 @@ for await (const line of rl) {
 			id,
 			result: {
 				protocolVersion: 1,
-				agentInfo: { name: "fake-gemini", version: "1.0.0" },
+				agentInfo: { name: scenario?.startsWith("cli-") ? "Antigravity ACP Server" : "fake-gemini", version: "1.0.0" },
 				authMethods: [
 					{ id: "oauth-personal", name: "Log in with Google" },
 					{ id: "api", name: "Gemini API key", _meta: { "api-key": { provider: "google" } } },
@@ -100,6 +100,10 @@ for await (const line of rl) {
 			setTimeout(() => process.exit(0), 10);
 		}
 	} else if (method === "authenticate") {
+		if (scenario?.startsWith("cli-")) {
+			send({ jsonrpc: "2.0", id, error: { code: -32601, message: "CLI cached login must not call authenticate" } });
+			continue;
+		}
 		if (tracksAuth && params.methodId === "api") authMode = "API key";
 		if (tracksAuth && params.methodId === "oauth-personal") {
 			const tokenFile = path.join(process.env.GEMINI_HOME, "antigravity-acp", "acp_token.json");
@@ -145,6 +149,10 @@ for await (const line of rl) {
 		}
 		send({ jsonrpc: "2.0", id, result: {} });
 	} else if (method === "session/new") {
+		if (scenario === "cli-unauthenticated") {
+			send({ jsonrpc: "2.0", id, error: { code: -32000, message: "Authentication required" } });
+			continue;
+		}
 		if (scenario === "session-timeout") continue;
 		if (scenario === "internal-error") {
 			send({

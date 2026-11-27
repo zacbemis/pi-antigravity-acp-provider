@@ -8,6 +8,7 @@ import { resolveAntigravityAcpLaunch } from "./antigravity.js";
 import { redact } from "./errors.js";
 import { applyAcpProxyEnvironment } from "./proxy.js";
 import { applyCredentialStorageEnvironment, type CredentialStorageOptions } from "./credential-storage.js";
+import { authenticationBackend } from "./auth-backend.js";
 const STDERR_LIMIT = 16 * 1024;
 const STDERR_LINE_LIMIT = 4 * 1024;
 // Longer than supervisor.mjs's 750 ms agent-tree escalation window.
@@ -151,9 +152,9 @@ export class AntigravityProcess {
 			resolveExit = resolve;
 		});
 
-		const env = applyCredentialStorageEnvironment(
-			applyDefaultTlsEnvironment(applyAcpProxyEnvironment(options.env ?? process.env)),
-			options.credentialStorage ?? {},
+		const baseEnv = applyDefaultTlsEnvironment(applyAcpProxyEnvironment(options.env ?? process.env));
+		const env = authenticationBackend().kind === "cli" ? baseEnv : applyCredentialStorageEnvironment(
+			baseEnv, options.credentialStorage ?? {},
 		);
 		const child = spawn(command, args, {
 			cwd: path.resolve(options.cwd),

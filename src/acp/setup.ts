@@ -8,6 +8,7 @@ import { promisify } from "node:util";
 import { Open, type File as ZipFile } from "unzipper";
 
 import { loadConfig, type RuntimeUpdateMode } from "../config.js";
+import { authenticationBackend } from "./auth-backend.js";
 import { resolveAntigravityAcpLaunch, type AntigravityLaunch } from "./antigravity.js";
 import { fileBackedAcpEnvironment, providerAcpDirectory } from "./credential-storage.js";
 import { AntigravityAcpConnection } from "./connection.js";
@@ -729,6 +730,7 @@ function pointCurrentAt(root: string, destination: string): void {
 }
 
 function configureDefaultAuth(): void {
+	if (authenticationBackend().kind === "cli") return;
 	const directory = providerAcpDirectory();
 	const settingsFile = path.join(directory, "settings.json");
 	const tokenFile = path.join(directory, "acp_token.json");

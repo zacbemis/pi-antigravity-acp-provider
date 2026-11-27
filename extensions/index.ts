@@ -5,7 +5,6 @@ import type {
 } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 
-import { describeCredentialStorage, providerAcpEnvironment } from "../src/acp/credential-storage.js";
 import { errorMessage } from "../src/acp/errors.js";
 import { resolveAntigravityAcpEntry } from "../src/acp/process.js";
 import {
@@ -159,10 +158,7 @@ export function registerAntigravityAcp(pi: ExtensionAPI, connectionFactory?: Ant
 			}
 			if (command === "logout" || command === "account" || command === "switch-account") {
 				await runtime.logout();
-				ctx.ui.notify(
-					"Cleared this Pi profile's Google login and saved ACP sessions. Use /logout to remove the Pi sign-in record, or /login antigravity-acp to choose another account.",
-					"info",
-				);
+				ctx.ui.notify(runtime.logoutDescription(), "info");
 				return;
 			}
 			if (command === "quota") {
@@ -255,7 +251,7 @@ export function registerAntigravityAcp(pi: ExtensionAPI, connectionFactory?: Ant
 					`Runtime: installed=${setup.installedVersion ?? "external/unknown"} approved=${update?.approvedVersion ?? setup.approvedVersion} registry=${update?.latestVersion ?? "unavailable"} updates=${setup.updateMode}; ACP SDK ${ACP_SDK_VERSION}, protocol ${ACP_PROTOCOL_VERSION}`,
 					`Antigravity server: ${entry}`,
 					`Authentication: ${auth.status}${auth.authType ? ` (${auth.authType})` : ""}`,
-					`Credential storage (preflight): ${describeCredentialStorage({ env: providerAcpEnvironment() })}`,
+					`Credential storage (preflight): ${runtime.credentialStorageDescription()}`,
 					`Requested permission mode: ${permissionModeLabel(snapshot.permissionMode)}`,
 					`Tool activity mode: ${snapshot.toolActivityMode}`,
 					`Active bindings: ${snapshot.bindings}`,

@@ -2,7 +2,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-const LIVE_FLAGS = ["PI_ANTIGRAVITY_ACP_REAL", "PI_ANTIGRAVITY_ACP_LIVE", "PI_ANTIGRAVITY_ACP_QUALIFY"];
+const LIVE_FLAGS = ["PI_ANTIGRAVITY_ACP_REAL", "PI_ANTIGRAVITY_ACP_LIVE", "PI_ANTIGRAVITY_ACP_QUALIFY", "PI_ANTIGRAVITY_ACP_CLI_LIVE"];
 
 // Opt-in live suites need the real Antigravity store; every other run gets a throwaway home so a test
 // that forgets to stub HOME/GEMINI_HOME cannot rewrite the developer's credentials or settings.
@@ -13,5 +13,6 @@ export default function isolateHome(): (() => void) | undefined {
 	process.env.USERPROFILE = home;
 	process.env.PI_CODING_AGENT_DIR = path.join(home, ".pi", "agent");
 	delete process.env.GEMINI_HOME;
+	delete process.env.PI_ANTIGRAVITY_ACP_AUTH_BACKEND;
 	return () => fs.rmSync(home, { recursive: true, force: true });
 }
