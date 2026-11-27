@@ -239,7 +239,12 @@ describe("per-model inventories", () => {
 		expect(sessionModels(state)).toEqual({ currentModelId: "gemini-pro-orchestrator", availableModels: list1518 });
 	});
 
-	it("keeps a level only the thought selector knows", () => {
+	it("leaves qualified IDs to the legacy selection method when no thought selector exists", () => {
+		const state = selectSession({ bases: bases1518, current: "gemini-pro-orchestrator", list: list1518 });
+		expect(splitSessionModelId(state, "gemini-4-neon-xhigh")).toBeUndefined();
+	});
+
+	it("accepts a non-current model level named by the live thought selector", () => {
 		const table = { "gemini-4-neon": [...neonLevels, "ultra"], "gemini-3.8-flash": ["low", "medium", "ultra"] };
 		const state = selectSession({ bases: Object.keys(table), current: "gemini-3.8-flash", levels: table["gemini-3.8-flash"], list: listed(table) });
 		expect(sessionModels(state)).toEqual({ currentModelId: "gemini-3.8-flash-high", availableModels: listed(table) });
@@ -250,6 +255,7 @@ describe("per-model inventories", () => {
 		{ label: "an empty list", list: [] },
 		{ label: "base IDs only", list: bases.map((modelId) => ({ modelId, name: modelId })) },
 		{ label: "a model the selector no longer offers", list: [...listed(perModel), { modelId: "gemini-4-hydrogen-high", name: "Gemini 4 Hydrogen (High)" }] },
+		{ label: "an unknown suffix on a known base", list: [...listed(perModel), { modelId: "gemini-4-neon-pro", name: "Gemini 4 Neon Pro" }] },
 		{ label: "a selector model missing from the list", list: without("gemini-4-carbon-low", "gemini-4-carbon-medium", "gemini-4-carbon-high") },
 		{ label: "a repeated ID", list: [...listed(perModel), { modelId: "gemini-4-neon-xhigh", name: "Gemini 4 Neon (XHigh)" }] },
 		{ label: "the current model missing a level", list: without("gemini-3.8-flash-medium") },

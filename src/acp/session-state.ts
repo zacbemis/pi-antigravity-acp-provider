@@ -86,7 +86,7 @@ function basesOf(options: SessionConfigSelectOption[], levels: SessionConfigSele
 }
 
 /** The selectors that produce `modelId`: a selector value verbatim, or the
- * longest base value extended by one level. */
+ * longest base value extended by a suffix. */
 function selectionFor(modelId: string, values: string[], bases: string[]): ModelSelection | undefined {
 	if (values.includes(modelId)) return { base: modelId };
 	let selection: ModelSelection | undefined;
@@ -114,6 +114,9 @@ function legacyInventory(
 		if (inventory.has(info.modelId)) return undefined;
 		const selection = selectionFor(info.modelId, values, bases);
 		if (!selection) return undefined;
+		if (selection.effort !== undefined && !levels.includes(selection.effort) && splitEffortSuffix(info.modelId) === undefined) {
+			return undefined;
+		}
 		inventory.set(info.modelId, { info, selection });
 	}
 	// Each selector value is listed as itself or as its variants, never both or neither.
@@ -152,15 +155,12 @@ function synthesizedInventory(options: SessionConfigSelectOption[], levels: Sess
 	return inventory;
 }
 
-/** The IDs a session offers and how each is selected. The selectors describe
- * one moment: the `thought_level` options belong to the current model only.
- * The server's explicit list supplies every model's levels once the selectors
- * vouch for it, and the cross-product stands in otherwise. */
+/** One inventory for discovery and selection. */
 function modelInventory(state: SessionState, selector: SelectOption, levels: SessionConfigSelectOption[]): ModelInventory {
 	const options = selectorValues(selector);
 	const bases = basesOf(options, levels);
 	const values = options.map((option) => option.value);
-	// A server may echo a qualified current value; the thought selector describes its base.
+	// Resolve a qualified current value to its base before checking its levels.
 	const current = selectionFor(selector.currentValue, values, bases)?.base;
 	const currentBase = current !== undefined && bases.includes(current) ? current : undefined;
 	return legacyInventory(state.models?.availableModels, values, bases, currentBase, levels.map((level) => level.value))
@@ -171,9 +171,9 @@ function modelInventory(state: SessionState, selector: SelectOption, levels: Ses
  * thought selector lacks, without misinterpreting a whole ID. */
 export function splitSessionModelId(state: SessionState, modelId: string): { base: string; effort: string } | undefined {
 	const selector = findSessionSelector(state, "model");
-	if (!selector) return undefined;
 	const thought = findSessionSelector(state, "thought_level");
-	const selection = modelInventory(state, selector, thought ? selectorValues(thought) : []).get(modelId)?.selection;
+	if (!selector || !thought) return undefined;
+	const selection = modelInventory(state, selector, selectorValues(thought)).get(modelId)?.selection;
 	return selection?.effort === undefined ? undefined : { base: selection.base, effort: selection.effort };
 }
 
@@ -184,9 +184,7 @@ export function sessionModels(state: SessionState): { currentModelId: string; av
 	const levels = thought ? selectorValues(thought) : [];
 	const bases = basesOf(selectorValues(selector), levels);
 	const inventory = modelInventory(state, selector, levels);
-	// The current ID is read off the selectors. A current value that already
-	// names a whole ID, as a server echoes after the legacy method, is reported
-	// as-is; a base reports its live level.
+	// Legacy currentModelId may be stale; derive this ID from the live selectors.
 	const level = bases.length > 0 && levels.length > 0 && !carriesLevel(selector.currentValue, levels)
 		? thought?.currentValue
 		: undefined;
