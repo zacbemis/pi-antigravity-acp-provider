@@ -7,7 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AntigravityAcpConnection } from "../src/acp/connection.js";
 import { AntigravityAcpError } from "../src/acp/errors.js";
 import { parseUsageQuota } from "../src/acp/usage-quota.js";
-import { QUOTA_REQUEST_CHANNEL } from "../src/constants.js";
+import { QUOTA_REQUEST_CHANNEL, QUESTION_TOOL_NAME } from "../src/constants.js";
 import { PERMISSION_TOOL_NAME } from "../src/runtime.js";
 import {
 	createFakeContext,
@@ -154,6 +154,31 @@ describe("extension entry point", () => {
 		const result = await tool.execute("call", { requestId: call.id }, undefined, undefined, ctx as never);
 
 		expect(result.details).toMatchObject({ requestId: call.id, optionId: "allow-once", cancelled: false });
+	});
+
+	it.each(["selected", "cancelled", "blocked", "headless"])("resumes a native question after its Pi selector is %s", async (outcome) => {
+		const { pi, ctx } = await load("question-session");
+		const messages = [user("native question")];
+		const first = await stream(messages, "question-session");
+		expect(first.stopReason).toBe("toolUse");
+		const call = first.content.find((block) => block.type === "toolCall");
+		if (call?.type !== "toolCall") throw new Error("missing question tool call");
+		expect(call.name).toBe(QUESTION_TOOL_NAME);
+		const tool = pi.tools.get(QUESTION_TOOL_NAME)!;
+		ctx.ui.select.mockImplementation(async (_title: string, labels: string[]) => outcome === "cancelled" ? undefined
+			: labels.includes("2. Blue") ? "2. Blue" : "Submit answers");
+		Object.assign(ctx.ui, { input: vi.fn(async () => "") });
+		const result = outcome === "blocked" ? { content: [{ type: "text" as const, text: "Blocked" }], details: undefined }
+			: await tool.execute(call.id, call.arguments, undefined, undefined, { ...ctx, hasUI: outcome !== "headless" } as never);
+		const final = await stream([...messages, first, {
+			role: "toolResult", toolCallId: call.id, toolName: call.name, content: result.content,
+			isError: outcome === "blocked", timestamp: 2,
+		}], "question-session");
+		expect(final.stopReason).toBe("stop");
+		expect(final.content).toEqual([{ type: "text", text: outcome === "selected" ? "Answer: 2" : "Answer: cancel" }]);
+		const calls = fs.readFileSync(log, "utf8").trim().split("\n").map((line) => JSON.parse(line));
+		expect(calls.filter((entry) => entry.method === "session/prompt")).toHaveLength(1);
+		await expect(tool.execute(call.id, call.arguments, undefined, undefined, ctx as never)).rejects.toThrow("already answered");
 	});
 
 	it("shares one provider across loads and closes it when the last instance quits", async () => {

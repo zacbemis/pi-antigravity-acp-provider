@@ -1,5 +1,7 @@
 import type {
 	ContentBlock,
+	CreateElicitationRequest,
+	CreateElicitationResponse,
 	InitializeResponse,
 	RequestPermissionRequest,
 	RequestPermissionResponse,
@@ -30,6 +32,7 @@ import { abortError, AntigravityAcpError, errorMessage } from "./acp/errors.js";
 import { quotaExhaustion } from "./acp/quota.js";
 import { confirmsPermissionMode, permissionModeId, unsupportedPermissionMode } from "./acp/permission-policy.js";
 import { canonicalJson } from "./acp/runtime-manifest.js";
+import { elicitationForm, elicitationResult, type QuestionForm } from "./acp/elicitation.js";
 import { AcpSessionStore } from "./acp/session-store.js";
 import { sessionModels, sessionModes, type AcpModelInfo, type AcpNewSessionResponse } from "./acp/session-state.js";
 import { parseUsageQuota, type AntigravityQuotaSnapshot } from "./acp/usage-quota.js";
@@ -38,6 +41,7 @@ import {
 	DEFAULT_MAX_BINDINGS,
 	PERMISSION_RESULT_KIND,
 	PERMISSION_TOOL_NAME,
+	QUESTION_TOOL_NAME,
 } from "./constants.js";
 export { MANAGED_AUTH_MARKER, PERMISSION_RESULT_KIND, PERMISSION_TOOL_NAME } from "./constants.js";
 import { mapSessionUpdate } from "./acp/events.js";
@@ -74,7 +78,7 @@ interface PendingPermission {
 
 interface PendingPiTool {
 	invocation: PiToolInvocation;
-	/** Resolve the MCP request and release its bounded work-watchdog hold. */
+	/** Resolve the parked tool request and release its bounded work-watchdog hold. */
 	resolve: (result: CallToolResult) => void;
 }
 
@@ -168,6 +172,7 @@ export type AntigravityConnectionFactory = (options: AntigravityConnectionOption
 
 export class AntigravityRuntime {
 	private readonly bindings = new Map<string, Promise<Binding>>();
+	private readonly questions = new Map<string, QuestionForm>();
 	private readonly resolvedBindings = new Set<Binding>();
 	private readonly bindingPromises = new WeakMap<Binding, Promise<Binding>>();
 	private disposed = false;
@@ -485,6 +490,11 @@ export class AntigravityRuntime {
 			if (binding.permission?.id === requestId) return permissionView(binding.permission);
 		}
 		return undefined;
+	}
+
+	getQuestion(requestId: string): QuestionForm | undefined {
+		const form = this.questions.get(requestId);
+		return form ? structuredClone(form) : undefined;
 	}
 
 	async snapshot(includeStderr = false): Promise<RuntimeSnapshot> {
@@ -922,6 +932,7 @@ export class AntigravityRuntime {
 			handlers: {
 				onUpdate: (notification) => this.consumeUpdate(binding, notification),
 				onPermission: (request) => this.requestPermission(binding, request),
+				onElicitation: (request) => this.requestElicitation(binding, request),
 			},
 		}, apiKey);
 		try {
@@ -931,7 +942,7 @@ export class AntigravityRuntime {
 			this.assertSessionEpoch(key, epoch, sessionEpoch);
 			const omittedTools = initialize.agentCapabilities?.mcpCapabilities?.http === true
 				? planToolProjection(tools)
-				: tools.filter((tool) => tool.name !== PERMISSION_TOOL_NAME).map((tool) => ({ name: tool.name, reason: "Agent did not advertise MCP over HTTP" }));
+				: tools.filter((tool) => tool.name !== PERMISSION_TOOL_NAME && tool.name !== QUESTION_TOOL_NAME).map((tool) => ({ name: tool.name, reason: "Agent did not advertise MCP over HTTP" }));
 			let mcpServer;
 			if (tools.length > 0 && initialize.agentCapabilities?.mcpCapabilities?.http === true) {
 				bridge = new PiMcpBridge({
@@ -1093,6 +1104,24 @@ export class AntigravityRuntime {
 				resolve({ content: [{ type: "text", text: "Pi could not accept the tool call" }], isError: true });
 			}
 		});
+	}
+
+	private async requestElicitation(
+		binding: Binding | undefined,
+		request: CreateElicitationRequest,
+	): Promise<CreateElicitationResponse> {
+		const form = elicitationForm(request);
+		if (!binding || !("sessionId" in request) || request.sessionId !== binding.session.sessionId || !form) {
+			return { action: "cancel" };
+		}
+		const id = crypto.randomUUID();
+		this.questions.set(id, form);
+		try {
+			const result = await this.requestPiTool(binding, { id, name: QUESTION_TOOL_NAME, arguments: { requestId: id } });
+			return elicitationResult(form, result);
+		} finally {
+			this.questions.delete(id);
+		}
 	}
 
 	private requestPermission(
